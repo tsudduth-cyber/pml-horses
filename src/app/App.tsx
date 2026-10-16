@@ -70,8 +70,13 @@ function dueFrom(last: string | undefined, intervalDays: number) {
   } as const;
 }
 
+/**
+ * A horse with no name yet is identified by her pedigree or her dam, not by
+ * the word "unnamed" — that reads like it IS the name.
+ */
 function displayName(h: Horse) {
-  return h.pending ? "Unnamed" : h.barn || h.reg || "Unnamed";
+  if (h.pending) return h.idline || "Name pending";
+  return h.barn || h.reg || h.idline || "Name pending";
 }
 
 function subLine(h: Horse) {
@@ -88,7 +93,7 @@ function boughtText(h: Horse) {
 
 function profileText(h: Horse) {
   const L: string[] = [];
-  L.push(h.pending ? `Unnamed — ${h.idline ?? ""}`.trim() : h.barn || h.reg || "");
+  L.push(h.pending ? `Name pending — ${h.idline ?? ""}`.trim() : h.barn || h.reg || "");
   if (!h.pending && h.barn && h.reg && h.barn !== h.reg) L.push(h.reg);
   if (h.aqha) L.push("AQHA " + h.aqha);
   const sx = [h.sex, h.color].filter(Boolean).join(", ");

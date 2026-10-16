@@ -109,18 +109,36 @@ a.btn{text-decoration:none;text-align:center;display:block}
 .tag{font-size:11.5px;font-weight:600;padding:3px 8px;border:1px solid var(--rule);background:var(--paper);color:var(--soft)}
 
 /* care */
-.caredate{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--paper-2)}
-.caredate:last-child{border-bottom:0}
+/* A care date is never one tap away. Tapping the row opens the panel below;
+   only a button in that panel writes anything. A stray tap at the barn costs
+   a dismiss, not a wrong date in the record. */
+.carerow{border-bottom:1px solid var(--paper-2)}
+.carerow:last-child{border-bottom:0}
+.caredate{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 0;width:100%;
+  font:inherit;text-align:left;background:none;border:0;cursor:pointer;color:inherit}
 .caredate .l{font-size:14.5px;color:var(--soft)}
 .caredate .r{display:flex;align-items:center;gap:9px}
 .caredate .due{font-size:11px;font-weight:700;letter-spacing:.04em}
 .caredate .due.over{color:var(--alert)}
 .caredate .due.soon{color:var(--pend)}
 .caredate .due.ok{color:var(--good)}
-.caredate input{font:inherit;font-size:14px;font-family:var(--sans);padding:6px 8px;border:1px solid var(--rule);
-  background:var(--paper);color:var(--ink);border-radius:1px;width:150px}
-.caredate input:focus{outline:2px solid var(--leather);outline-offset:-1px}
-.caredate input.empty{color:var(--alert);border-color:var(--alert)}
+.caredate .val{font-size:14px;font-weight:600;min-width:84px;text-align:right}
+.caredate .val.empty{color:var(--mute);font-weight:500;font-style:italic}
+.caredate[aria-expanded="true"] .val{color:var(--leather)}
+
+.careedit{padding:4px 0 14px}
+.careedit .hint{font-size:11.5px;color:var(--mute);margin-bottom:9px}
+.careedit button{font:inherit;cursor:pointer;border-radius:1px}
+.careedit .prim{display:block;width:100%;padding:12px;background:var(--ink);color:var(--paper);
+  border:0;font-size:15px;font-weight:600}
+.careedit .pick{display:flex;gap:7px;margin-top:9px}
+.careedit .pick input{flex:1;font:inherit;font-size:15px;font-family:var(--sans);padding:9px;
+  border:1px solid var(--rule);background:var(--paper);color:var(--ink);border-radius:1px}
+.careedit .pick button{padding:0 18px;border:1px solid var(--ink);background:none;color:var(--ink);font-weight:600}
+.careedit .acts{display:flex;gap:16px;margin-top:12px}
+.careedit .clear{border:0;background:none;color:var(--alert);font-size:13px;font-weight:600;padding:0}
+.careedit .cancel{border:0;background:none;color:var(--mute);font-size:13px;padding:0;margin-left:auto}
+.careedit button:disabled{opacity:.45}
 
 .task{padding:16px 20px;border-bottom:1px solid var(--rule)}
 .task .top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}

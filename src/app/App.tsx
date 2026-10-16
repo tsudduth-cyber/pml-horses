@@ -28,6 +28,13 @@ const SCLASS: Record<string, string> = {
 const money = (n: number) =>
   "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
 
+/** Today in the viewer's own timezone, as YYYY-MM-DD. */
+function today() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function fmt(d?: string | null) {
   if (!d) return null;
   return new Date(d + "T12:00").toLocaleDateString("en-US", {
@@ -168,31 +175,78 @@ function CareRow({
   onSave: (key: CareKey, date: string | null) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
   const due = dueFrom(value, task.days);
 
+  const commit = async (date: string | null) => {
+    setBusy(true);
+    await onSave(task.key, date);
+    setBusy(false);
+    setOpen(false);
+  };
+
   return (
-    <div className="caredate">
-      <span className="l">{task.label}</span>
-      <span className="r">
-        {due && (
-          <span className={`due ${due.level}`}>
-            {due.level === "over" ? "OVERDUE " : "due "}
-            {due.text}
+    <div className="carerow">
+      <button
+        className="caredate"
+        aria-expanded={open}
+        disabled={busy}
+        onClick={() => {
+          setDraft(value ?? today());
+          setOpen((v) => !v);
+        }}
+      >
+        <span className="l">{task.label}</span>
+        <span className="r">
+          {due && (
+            <span className={`due ${due.level}`}>
+              {due.level === "over" ? "OVERDUE " : "due "}
+              {due.text}
+            </span>
+          )}
+          <span className={value ? "val" : "val empty"}>
+            {value ? fmt(value) : "not on file"}
           </span>
-        )}
-        <input
-          type="date"
-          aria-label={`${task.label} last done, ${displayName(horse)}`}
-          className={value ? "" : "empty"}
-          value={value ?? ""}
-          disabled={busy}
-          onChange={async (e) => {
-            setBusy(true);
-            await onSave(task.key, e.target.value || null);
-            setBusy(false);
-          }}
-        />
-      </span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="careedit">
+          <div className="hint">
+            {task.label} last done — {task.every}
+          </div>
+          <button className="prim" disabled={busy} onClick={() => commit(today())}>
+            Done today
+          </button>
+          <div className="pick">
+            <input
+              type="date"
+              aria-label={`${task.label} date, ${displayName(horse)}`}
+              value={draft}
+              max={today()}
+              disabled={busy}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            <button
+              disabled={busy || !draft}
+              onClick={() => commit(draft)}
+            >
+              Save
+            </button>
+          </div>
+          <div className="acts">
+            {value && (
+              <button className="clear" disabled={busy} onClick={() => commit(null)}>
+                Clear date
+              </button>
+            )}
+            <button className="cancel" disabled={busy} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

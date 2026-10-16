@@ -30,6 +30,22 @@ export async function graph<T = any>(
   return res.json();
 }
 
+/**
+ * Raw Graph fetch for binary responses — images, file content. Does not set
+ * Content-Type and does not parse the body, so the caller can stream it.
+ */
+export async function graphRaw(path: string): Promise<Response> {
+  const token = await getAccessToken();
+  const res = await fetch(path.startsWith("http") ? path : GRAPH + path, {
+    headers: { Authorization: `Bearer ${token}` },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new GraphError(res.status, (await res.text()).slice(0, 200));
+  }
+  return res;
+}
+
 /** Follows @odata.nextLink so a long list comes back whole. */
 export async function graphAll<T = any>(path: string): Promise<T[]> {
   const out: T[] = [];

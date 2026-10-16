@@ -138,6 +138,7 @@ async function readList(): Promise<Horse[]> {
 
 function toDoc(c: any): Doc {
   return {
+    id: String(c.id ?? ""),
     name: c.name,
     url: c.webUrl,
     folder: !!c.folder,

@@ -71,6 +71,17 @@ function dueFrom(last: string | undefined, intervalDays: number) {
 }
 
 /**
+ * Photos come through the app, not straight from SharePoint. A SharePoint
+ * webUrl in an <img> only renders for someone whose browser already holds a
+ * SharePoint session — true on a work desktop, false on a phone, where every
+ * photo would show as a broken image.
+ */
+function photoSrc(d: Doc, small = false) {
+  if (!d.id) return d.url; // nothing better to offer
+  return `/api/photo?id=${encodeURIComponent(d.id)}${small ? "&size=sm" : ""}`;
+}
+
+/**
  * A horse with no name yet is identified by her pedigree or her dam, not by
  * the word "unnamed" — that reads like it IS the name.
  */
@@ -297,10 +308,8 @@ function Detail({
 
       <div className="photo">
         {hero ? (
-          // Served straight from SharePoint; these URLs are short-lived, which
-          // is fine because the page is re-fetched on every load.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={hero.url} alt={displayName(h)} />
+          <img src={photoSrc(hero)} alt={displayName(h)} />
         ) : (
           <>
             <Mark h={h} />
@@ -318,7 +327,7 @@ function Detail({
               onClick={() => setShot(i)}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt={p.name} />
+              <img src={photoSrc(p, true)} alt={p.name} />
             </button>
           ))}
         </div>
@@ -605,7 +614,7 @@ export default function App({
                   <div className="thumb">
                     {h.photos[0] ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={h.photos[0].url} alt="" />
+                      <img src={photoSrc(h.photos[0], true)} alt="" />
                     ) : (
                       <Mark h={h} />
                     )}

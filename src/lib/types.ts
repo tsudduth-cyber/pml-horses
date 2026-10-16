@@ -9,6 +9,8 @@ export type Status =
 export type CareKey = "farrier" | "worm" | "vax" | "coggins" | "dental";
 
 export interface Doc {
+  /** Drive item id. Photos are fetched through /api/photo by this. */
+  id: string;
   name: string;
   url: string;
   folder: boolean;

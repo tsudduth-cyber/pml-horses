@@ -57,8 +57,11 @@ body{color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.45;fo
 .gapline{font-size:11.5px;color:var(--alert);margin-top:5px;font-weight:500}
 
 .back{display:flex;align-items:center;gap:7px;padding:12px 20px;border-bottom:1px solid var(--rule);font:inherit;font-size:13.5px;font-weight:600;background:var(--paper-2);width:100%;cursor:pointer;color:var(--ink)}
-.photo{height:230px;border-bottom:1px solid var(--rule);background:var(--paper-2);display:grid;place-items:center;gap:9px;overflow:hidden;position:relative}
-.photo img{width:100%;height:100%;object-fit:cover;display:block}
+/* Show the whole photo. A fixed-height frame with object-fit:cover crops to
+   the centre, and in a horse photo the centre is usually the neck — you end
+   up looking at ears. min-height keeps the empty state from collapsing. */
+.photo{min-height:230px;max-height:62vh;border-bottom:1px solid var(--rule);background:var(--paper-2);display:grid;place-items:center;gap:9px;overflow:hidden;position:relative}
+.photo img{width:100%;height:auto;max-height:62vh;object-fit:contain;display:block}
 .photo svg{width:42px;height:42px;fill:none;stroke:var(--mute);stroke-width:1.3}
 .photo span{font-size:10px;color:var(--mute);font-weight:700;letter-spacing:.16em}
 .shots{display:flex;gap:6px;padding:10px 20px;overflow-x:auto;border-bottom:1px solid var(--rule);scrollbar-width:none}

@@ -6,10 +6,14 @@ import AzureADProvider from "next-auth/providers/azure-ad";
  * the app sees exactly what he can already see in SharePoint — nothing more.
  */
 /**
- * Creating the SharePoint list needs Sites.Manage.All — Sites.ReadWrite.All
- * only covers items inside a list that already exists. That is a one-time
- * need, so it is behind an env flag: set SP_SETUP_SCOPE=1 to run /api/setup,
- * then clear it and redeploy so the steady state stays read/write only.
+ * Day-to-day the app only reads horse folders and writes care dates, so
+ * Sites.ReadWrite.All is all it asks for.
+ *
+ * Creating the "PML Horses" list needed Sites.Manage.All, because
+ * Sites.ReadWrite.All only covers items inside a list that already exists.
+ * That was a one-time job and the scope is deliberately not requested here
+ * any more. If the list ever has to be rebuilt, revert this commit to put
+ * "Sites.Manage.All" back, run /api/setup?confirm=yes, then revert again.
  */
 const SCOPES = [
   "openid",
@@ -17,7 +21,6 @@ const SCOPES = [
   "email",
   "offline_access",
   "Sites.ReadWrite.All",
-  ...(process.env.SP_SETUP_SCOPE === "1" ? ["Sites.Manage.All"] : []),
 ].join(" ");
 
 const TENANT = process.env.AZURE_AD_TENANT_ID!;

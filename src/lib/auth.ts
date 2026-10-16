@@ -5,12 +5,19 @@ import AzureADProvider from "next-auth/providers/azure-ad";
  * Delegated Graph access. Philip signs in with his own Microsoft account and
  * the app sees exactly what he can already see in SharePoint — nothing more.
  */
+/**
+ * Creating the SharePoint list needs Sites.Manage.All — Sites.ReadWrite.All
+ * only covers items inside a list that already exists. That is a one-time
+ * need, so it is behind an env flag: set SP_SETUP_SCOPE=1 to run /api/setup,
+ * then clear it and redeploy so the steady state stays read/write only.
+ */
 const SCOPES = [
   "openid",
   "profile",
   "email",
   "offline_access",
   "Sites.ReadWrite.All",
+  ...(process.env.SP_SETUP_SCOPE === "1" ? ["Sites.Manage.All"] : []),
 ].join(" ");
 
 const TENANT = process.env.AZURE_AD_TENANT_ID!;

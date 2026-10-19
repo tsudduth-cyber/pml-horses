@@ -1,10 +1,13 @@
 import { graph, graphAll } from "./graph";
-import type { Horse, Doc, Status, CareKey } from "./types";
+import type { Horse, Doc, Status, CareKey, DerivedCare } from "./types";
+import { CARE_TASKS } from "./types";
 
 const HOST = process.env.SP_HOSTNAME!;
 const DRIVE = process.env.SP_DRIVE_ID!;
 const LIST_NAME = process.env.SP_LIST_NAME ?? "PML Horses";
 const ROOT = process.env.SP_HORSES_PATH!;
+/** Whole-barn paperwork lives here — one farrier invoice covers everyone. */
+const BARN_FOLDER = process.env.SP_BARN_FOLDER ?? "_Barn";
 
 /**
  * Resolve the site and list by name so nobody has to go hunting for GUIDs.
@@ -127,6 +130,7 @@ async function readList(): Promise<Horse[]> {
       notes: lines(f.Notes),
       missing: lines(f.Missing),
       care,
+      derived: {},
       folderName,
       folderUrl: null,
       docs: [],
@@ -185,6 +189,73 @@ async function readFolder(folderName: string) {
   }
 }
 
+/**
+ * Pull a date out of a filename. The filing standard is m.d.yy — "Sully
+ * Coggins 10.13.26.pdf" — and that is what this looks for first. It also
+ * takes m-d-yy and an ISO date, because people type what they type.
+ *
+ * Returns null rather than guessing. A wrong care date is worse than none:
+ * a wrong Coggins reads as covered when the horse is not.
+ */
+export function dateInName(name: string): string | null {
+  const iso = name.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/);
+  if (iso) {
+    const [, y, m, d] = iso;
+    return ymd(+y, +m, +d);
+  }
+
+  const us = name.match(/\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2}|\d{4})\b/);
+  if (us) {
+    const [, mm, dd, yy] = us;
+    const year = yy.length === 2 ? 2000 + +yy : +yy;
+    return ymd(year, +mm, +dd);
+  }
+  return null;
+}
+
+function ymd(y: number, m: number, d: number): string | null {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  // Reject a date that rolled over — 2.30.26 is a typo, not Mar 2.
+  if (dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  // Nothing in the future, and nothing absurdly old.
+  const now = Date.now();
+  if (dt.getTime() > now + 864e5 || y < 2000) return null;
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Work out care dates from the paperwork on file.
+ *
+ * Kristina files a vet or farrier bill with the date in the name; this reads
+ * it so nobody has to key the same date twice. Only the newest file for a
+ * task counts. Barn-wide paperwork — one farrier visit, one invoice — lives
+ * in the _Barn folder and applies to every horse.
+ */
+function deriveCare(
+  docs: Doc[],
+  barn: boolean
+): Partial<Record<CareKey, DerivedCare>> {
+  const out: Partial<Record<CareKey, DerivedCare>> = {};
+  for (const d of docs) {
+    if (d.folder) continue;
+    // A picture is never proof that work was done. "Shots 10.13.26.jpg" is
+    // a photo of a horse, not a vaccination record.
+    if (/\.(jpe?g|png|heic|webp|gif|mov|mp4)$/i.test(d.name)) continue;
+    const base = d.name.replace(/\.[a-z0-9]+$/i, "");
+    const date = dateInName(base);
+    if (!date) continue;
+    for (const t of CARE_TASKS) {
+      if (!t.match.test(base)) continue;
+      const held = out[t.key];
+      if (!held || date > held.date) {
+        out[t.key] = { date, from: d.name, barn };
+      }
+    }
+  }
+  return out;
+}
+
 /** Build the web URL for a horse's folder so "Open folder" goes somewhere real. */
 function folderWebUrl(folderName: string): string {
   const base = process.env.SP_WEB_BASE!.replace(/\/$/, "");
@@ -199,7 +270,12 @@ function folderWebUrl(folderName: string): string {
  * for the documents and photos. Folders are read in parallel.
  */
 export async function getHorses(): Promise<Horse[]> {
-  const horses = await readList();
+  const [horses, barn] = await Promise.all([
+    readList(),
+    // One farrier visit does the whole barn and produces one invoice, so
+    // whole-barn paperwork is filed once here rather than copied 22 times.
+    readFolder(BARN_FOLDER).then((f) => deriveCare(f.docs, true)),
+  ]);
 
   await Promise.all(
     horses.map(async (h) => {
@@ -208,8 +284,15 @@ export async function getHorses(): Promise<Horse[]> {
       h.docs = docs;
       h.photos = photos;
       h.folderUrl = folderWebUrl(h.folderName);
+      // A horse's own paperwork beats the barn-wide file.
+      h.derived = { ...barn, ...deriveCare(docs, false) };
     })
   );
+
+  // A horse with no folder still gets the barn-wide dates.
+  for (const h of horses) {
+    if (!h.folderName) h.derived = { ...barn };
+  }
 
   return horses.sort(
     (a, b) =>

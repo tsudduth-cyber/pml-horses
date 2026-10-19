@@ -8,6 +8,15 @@ export type Status =
 
 export type CareKey = "farrier" | "worm" | "vax" | "coggins" | "dental";
 
+/** A care date read off a filed document rather than entered by hand. */
+export interface DerivedCare {
+  date: string;
+  /** The file it came from, so the number is never unexplained. */
+  from: string;
+  /** True when it came from the barn-wide folder, not this horse's. */
+  barn: boolean;
+}
+
 export interface Doc {
   /** Drive item id. Photos are fetched through /api/photo by this. */
   id: string;
@@ -41,7 +50,10 @@ export interface Horse {
   breeding: string | null;
   notes: string[];
   missing: string[];
+  /** Entered by hand in the app. Always wins over a derived date. */
   care: Partial<Record<CareKey, string>>;
+  /** Read off filed paperwork. Used only where `care` has nothing. */
+  derived: Partial<Record<CareKey, DerivedCare>>;
   folderName: string | null;
   folderUrl: string | null;
   docs: Doc[];
@@ -67,12 +79,44 @@ export const CARE_TASKS: {
   label: string;
   every: string;
   days: number;
+  /** Words in a filename that mark it as paperwork for this task. */
+  match: RegExp;
 }[] = [
-  { key: "farrier", label: "Farrier", every: "every 6–8 weeks", days: 49 },
-  { key: "worm", label: "Deworming", every: "quarterly", days: 91 },
-  { key: "vax", label: "Core vaccinations", every: "yearly", days: 365 },
-  { key: "coggins", label: "Coggins", every: "yearly", days: 365 },
-  { key: "dental", label: "Dental", every: "yearly", days: 365 },
+  {
+    key: "farrier",
+    label: "Farrier",
+    every: "every 6–8 weeks",
+    days: 49,
+    match: /\b(farrier|shoe\w*|trim\w*|reset)\b/i,
+  },
+  {
+    key: "worm",
+    label: "Deworming",
+    every: "quarterly",
+    days: 91,
+    match: /\b(deworm\w*|worming|wormer|worm)\b/i,
+  },
+  {
+    key: "vax",
+    label: "Core vaccinations",
+    every: "yearly",
+    days: 365,
+    match: /\b(vax|vacc\w*|immuniz\w*)\b/i,
+  },
+  {
+    key: "coggins",
+    label: "Coggins",
+    every: "yearly",
+    days: 365,
+    match: /\b(coggins|eia)\b/i,
+  },
+  {
+    key: "dental",
+    label: "Dental",
+    every: "yearly",
+    days: 365,
+    match: /\b(dental|teeth|float\w*)\b/i,
+  },
 ];
 
 /** A live animal that could need routine care. */

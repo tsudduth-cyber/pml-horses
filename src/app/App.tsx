@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback } from "react";
-import type { Horse, CareKey, Doc } from "@/lib/types";
+import type { Horse, CareKey, Doc, DerivedCare } from "@/lib/types";
 import { STATUS_LABEL, CARE_TASKS, isAnimal } from "@/lib/types";
 import {
   PageIcon,
@@ -27,6 +27,14 @@ const SCLASS: Record<string, string> = {
 
 const money = (n: number) =>
   "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+
+/**
+ * The care date in force for a horse: what someone entered by hand, else
+ * what the filed paperwork says.
+ */
+function careDate(h: Horse, k: CareKey) {
+  return h.care[k] ?? h.derived[k]?.date;
+}
 
 /** Today in the viewer's own timezone, as YYYY-MM-DD. */
 function today() {
@@ -167,11 +175,14 @@ function CareRow({
   horse,
   task,
   value,
+  from,
   onSave,
 }: {
   horse: Horse;
   task: (typeof CARE_TASKS)[number];
   value?: string;
+  /** Set when the date was read off filed paperwork rather than entered. */
+  from?: DerivedCare;
   onSave: (key: CareKey, date: string | null) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -205,16 +216,25 @@ function CareRow({
               {due.text}
             </span>
           )}
-          <span className={value ? "val" : "val empty"}>
+          <span className={value ? (from ? "val derived" : "val") : "val empty"}>
             {value ? fmt(value) : "not on file"}
           </span>
         </span>
       </button>
 
+      {from && !open && (
+        <div className="fromfile">
+          from {from.from}
+          {from.barn && " (whole barn)"}
+        </div>
+      )}
+
       {open && (
         <div className="careedit">
           <div className="hint">
-            {task.label} last done — {task.every}
+            {from
+              ? `Read from ${from.from}${from.barn ? " (whole barn)" : ""}. Entering a date here replaces it.`
+              : `${task.label} last done — ${task.every}`}
           </div>
           <button className="prim" disabled={busy} onClick={() => commit(today())}>
             Done today
@@ -236,9 +256,12 @@ function CareRow({
             </button>
           </div>
           <div className="acts">
-            {value && (
+            {/* Only a hand-entered date can be cleared. Clearing a derived
+                one would mean deleting the paperwork, which is not this
+                app's job — it falls back to the file on its own. */}
+            {horse.care[task.key] && (
               <button className="clear" disabled={busy} onClick={() => commit(null)}>
-                Clear date
+                {from ? "Use the filed date instead" : "Clear date"}
               </button>
             )}
             <button className="cancel" disabled={busy} onClick={() => setOpen(false)}>
@@ -428,7 +451,8 @@ function Detail({
               key={t.key}
               horse={h}
               task={t}
-              value={h.care[t.key]}
+              value={h.care[t.key] ?? h.derived[t.key]?.date}
+              from={h.care[t.key] ? undefined : h.derived[t.key]}
               onSave={onSave}
             />
           ))}
@@ -600,7 +624,7 @@ export default function App({
     }[] = [];
     for (const h of herd) {
       for (const t of CARE_TASKS) {
-        const d = dueFrom(h.care[t.key], t.days);
+        const d = dueFrom(careDate(h, t.key), t.days);
         if (d && d.days <= 45) out.push({ horse: h, task: t, due: d });
       }
     }
@@ -743,7 +767,7 @@ export default function App({
           ))}
 
         {CARE_TASKS.map((t) => {
-          const have = herd.filter((h) => h.care[t.key]);
+          const have = herd.filter((h) => careDate(h, t.key));
           const pct = herd.length
             ? Math.round((have.length / herd.length) * 100)
             : 0;
@@ -765,7 +789,7 @@ export default function App({
               {have.length > 0 && (
                 <div className="who">
                   {have.map((h) => {
-                    const d = dueFrom(h.care[t.key], t.days)!;
+                    const d = dueFrom(careDate(h, t.key), t.days)!;
                     return (
                       <button
                         key={h.id}

@@ -124,6 +124,10 @@ a.btn{text-decoration:none;text-align:center;display:block}
 .caredate .due.ok{color:var(--good)}
 .caredate .val{font-size:14px;font-weight:600;min-width:84px;text-align:right}
 .caredate .val.empty{color:var(--mute);font-weight:500;font-style:italic}
+/* A date read off paperwork is underlined, so it never passes for one
+   somebody confirmed. The file it came from is named underneath. */
+.caredate .val.derived{font-weight:500;border-bottom:1px dotted var(--mute)}
+.fromfile{font-size:11px;color:var(--mute);padding:0 0 9px;margin-top:-4px}
 .caredate[aria-expanded="true"] .val{color:var(--leather)}
 
 .careedit{padding:4px 0 14px}

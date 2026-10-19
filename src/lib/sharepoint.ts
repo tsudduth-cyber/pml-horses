@@ -237,6 +237,26 @@ function deriveCare(
   barn: boolean
 ): Partial<Record<CareKey, DerivedCare>> {
   const out: Partial<Record<CareKey, DerivedCare>> = {};
+  for (const e of careEntries(docs)) {
+    const held = out[e.key];
+    if (!held || e.date > held.date) {
+      out[e.key] = { date: e.date, from: e.from, barn };
+    }
+  }
+  return out;
+}
+
+/** One piece of care paperwork: what it was, when, and the file it came from. */
+interface CareEntry {
+  key: CareKey;
+  date: string;
+  from: string;
+  /** The filename without its extension, for matching horse names against. */
+  base: string;
+}
+
+export function careEntries(docs: Doc[]): CareEntry[] {
+  const out: CareEntry[] = [];
   for (const d of docs) {
     if (d.folder) continue;
     // A picture is never proof that work was done. "Shots 10.13.26.jpg" is
@@ -246,14 +266,35 @@ function deriveCare(
     const date = dateInName(base);
     if (!date) continue;
     for (const t of CARE_TASKS) {
-      if (!t.match.test(base)) continue;
-      const held = out[t.key];
-      if (!held || date > held.date) {
-        out[t.key] = { date, from: d.name, barn };
-      }
+      if (t.match.test(base)) out.push({ key: t.key, date, from: d.name, base });
     }
   }
   return out;
+}
+
+const rxEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Which horses a piece of barn paperwork is about.
+ *
+ * A vet comes out and does six head on one invoice, so the filename can name
+ * them — "Vet Vax 9.2.26 - Sully, Roanie, Darlin". Naming nobody means the
+ * whole barn, which is the farrier case. Returns null for "everyone".
+ */
+export function namedHorses(base: string, horses: Horse[]): Set<string> | null {
+  const hit = new Set<string>();
+  for (const h of horses) {
+    for (const name of [h.barn, h.reg]) {
+      // Two characters is enough — JP is a real barn name here, and missing
+      // it would spread his invoice across the whole place.
+      if (!name || name.length < 2) continue;
+      if (new RegExp(`(^|[^a-z0-9])${rxEscape(name)}([^a-z0-9]|$)`, "i").test(base)) {
+        hit.add(h.id);
+        break;
+      }
+    }
+  }
+  return hit.size ? hit : null;
 }
 
 /** Build the web URL for a horse's folder so "Open folder" goes somewhere real. */
@@ -270,29 +311,42 @@ function folderWebUrl(folderName: string): string {
  * for the documents and photos. Folders are read in parallel.
  */
 export async function getHorses(): Promise<Horse[]> {
-  const [horses, barn] = await Promise.all([
+  const [horses, barnDocs] = await Promise.all([
     readList(),
     // One farrier visit does the whole barn and produces one invoice, so
     // whole-barn paperwork is filed once here rather than copied 22 times.
-    readFolder(BARN_FOLDER).then((f) => deriveCare(f.docs, true)),
+    readFolder(BARN_FOLDER).then((f) => f.docs),
   ]);
+
+  // Work out who each barn document is about once, not once per horse.
+  const barn = careEntries(barnDocs).map((e) => ({
+    ...e,
+    only: namedHorses(e.base, horses),
+  }));
 
   await Promise.all(
     horses.map(async (h) => {
-      if (!h.folderName) return;
+      // Barn paperwork first, so the horse's own file beats it.
+      const from: Partial<Record<CareKey, DerivedCare>> = {};
+      for (const e of barn) {
+        if (e.only && !e.only.has(h.id)) continue;
+        const held = from[e.key];
+        if (!held || e.date > held.date) {
+          from[e.key] = { date: e.date, from: e.from, barn: true };
+        }
+      }
+
+      if (!h.folderName) {
+        h.derived = from;
+        return;
+      }
       const { docs, photos } = await readFolder(h.folderName);
       h.docs = docs;
       h.photos = photos;
       h.folderUrl = folderWebUrl(h.folderName);
-      // A horse's own paperwork beats the barn-wide file.
-      h.derived = { ...barn, ...deriveCare(docs, false) };
+      h.derived = { ...from, ...deriveCare(docs, false) };
     })
   );
-
-  // A horse with no folder still gets the barn-wide dates.
-  for (const h of horses) {
-    if (!h.folderName) h.derived = { ...barn };
-  }
 
   return horses.sort(
     (a, b) =>

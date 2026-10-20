@@ -220,8 +220,10 @@ a.btn{text-decoration:none;text-align:center;display:block}
   .mast { order: -2; }
   .tabs {
     order: -1;
-    position: sticky;
-    top: 63px;
+    /* Static, not sticky: a second sticky strip under the sticky masthead
+       is fiddly to get right inside the inset card and buys little on a
+       screen this tall. */
+    position: static;
     max-width: none;
     margin: 0;
     border-top: 0;

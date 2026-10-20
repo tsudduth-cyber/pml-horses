@@ -197,3 +197,99 @@ a.btn{text-decoration:none;text-align:center;display:block}
 .gate img{height:56px;width:auto}
 .gate p{font-size:14.5px;color:var(--soft);line-height:1.55;max-width:30ch}
 .gate .btn{flex:0 0 auto;padding:13px 28px}
+
+/* ───────────────────────────────────────────────────────────────
+   Desktop
+
+   The app is built for Philip's phone and that layout stays the
+   canonical one. On a monitor a 430px column in the middle of the
+   screen reads as unfinished, so above 900px the same views get
+   room: the herd in columns, the tab bar as a top nav, detail text
+   held to a readable measure. Nothing below changes behaviour.
+   ─────────────────────────────────────────────────────────────── */
+@media (min-width: 900px) {
+  .shell {
+    max-width: 1120px;
+    margin: 32px auto;
+    min-height: calc(100vh - 64px);
+  }
+
+  /* Tabs move from a fixed phone bar to a nav strip under the
+     masthead. Source order is header, views, nav — order puts the
+     nav back where it reads. */
+  .mast { order: -2; }
+  .tabs {
+    order: -1;
+    position: sticky;
+    top: 63px;
+    max-width: none;
+    margin: 0;
+    border-top: 0;
+    border-bottom: 1px solid var(--rule);
+    box-shadow: none;
+    padding: 0 12px;
+  }
+  .tab {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 8px;
+    padding: 13px 18px;
+  }
+  .tab svg { width: 15px; height: 15px; }
+  .view { padding-bottom: 0; }
+
+  /* The herd reads as a grid, not a 22-row column. */
+  .list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  }
+  .list .row {
+    border-right: 1px solid var(--rule);
+    align-items: flex-start;
+  }
+  .thumb { flex-basis: 64px; height: 64px; }
+
+  /* Care: the five task cards sit side by side; what is due keeps
+     the full width, because that is the part worth reading first. */
+  .view.care {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    align-content: start;
+  }
+  .view.care > .when { grid-column: 1 / -1; }
+  .view.care > .task { border-right: 1px solid var(--rule); }
+
+  .view.breeding {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    align-content: start;
+  }
+  .view.breeding > .when { border-right: 1px solid var(--rule); }
+  .view.breeding > .sec { grid-column: 1 / -1; }
+
+  /* Recent: days flow into two columns instead of one long scroll. */
+  .view.recent { column-count: 2; column-gap: 0; }
+  .view.recent > div { break-inside: avoid; }
+  .view.recent > div:first-child { border-left: 0; }
+
+  /* Detail stays one column — a horse record is read top to bottom —
+     but held to a measure so lines do not run the full 1120px. */
+  .detail > * {
+    max-width: 780px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
+  .detail > .back { max-width: none; }
+  .detail .photo { max-height: 56vh; }
+  .detail .photo img { max-height: 56vh; }
+
+  /* The sheet is a phone affordance; centre it as a dialog. */
+  .sheet {
+    max-width: 520px;
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 1px solid var(--rule);
+  }
+}

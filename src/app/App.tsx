@@ -671,7 +671,7 @@ export default function App({
             </button>
           ))}
         </div>
-        <div>
+        <div className="list">
           {horses
             .filter(FILTERS.find((f) => f[0] === filter)![2])
             .map((h) => {
@@ -731,7 +731,7 @@ export default function App({
       </main>
 
       {/* DETAIL */}
-      <main className={`view${view === "detail" ? "" : " hidden"}`}>
+      <main className={`view detail${view === "detail" ? "" : " hidden"}`}>
         {open && (
           <Detail
             key={open.id}
@@ -745,7 +745,7 @@ export default function App({
       </main>
 
       {/* CARE */}
-      <main className={`view${view === "care" ? "" : " hidden"}`}>
+      <main className={`view care${view === "care" ? "" : " hidden"}`}>
         {upcoming.length > 0 &&
           upcoming.map(({ horse, task, due }) => (
             <div
@@ -808,7 +808,7 @@ export default function App({
       </main>
 
       {/* BREEDING */}
-      <main className={`view${view === "breeding" ? "" : " hidden"}`}>
+      <main className={`view breeding${view === "breeding" ? "" : " hidden"}`}>
         {breeders.map((h) => (
           <div className="when" key={h.id}>
             <div className="d">{displayName(h)}</div>
@@ -836,7 +836,7 @@ export default function App({
       </main>
 
       {/* RECENT */}
-      <main className={`view${view === "recent" ? "" : " hidden"}`}>
+      <main className={`view recent${view === "recent" ? "" : " hidden"}`}>
         {recent.map((d) => (
           <div key={d.day}>
             <div className="day">{d.day.toUpperCase()}</div>

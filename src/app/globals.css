@@ -251,7 +251,7 @@ a.btn{text-decoration:none;text-align:center;display:block}
 
   /* Care: the five task cards sit side by side; what is due keeps
      the full width, because that is the part worth reading first. */
-  .view.care {
+  .view.care:not(.hidden) {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
     align-content: start;
@@ -259,7 +259,7 @@ a.btn{text-decoration:none;text-align:center;display:block}
   .view.care > .when { grid-column: 1 / -1; }
   .view.care > .task { border-right: 1px solid var(--rule); }
 
-  .view.breeding {
+  .view.breeding:not(.hidden) {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
     align-content: start;
@@ -268,7 +268,7 @@ a.btn{text-decoration:none;text-align:center;display:block}
   .view.breeding > .sec { grid-column: 1 / -1; }
 
   /* Recent: days flow into two columns instead of one long scroll. */
-  .view.recent { column-count: 2; column-gap: 0; }
+  .view.recent:not(.hidden) { column-count: 2; column-gap: 0; }
   .view.recent > div { break-inside: avoid; }
   .view.recent > div:first-child { border-left: 0; }
 

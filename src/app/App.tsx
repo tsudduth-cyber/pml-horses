@@ -540,9 +540,12 @@ type View = "horses" | "detail" | "care" | "breeding" | "recent";
 export default function App({
   horses: initial,
   season,
+  rescan,
 }: {
   horses: Horse[];
   season: { when: string; what: string; detail: string; hot: boolean }[];
+  /** The saved reading of the paperwork has gone stale. */
+  rescan?: boolean;
 }) {
   const [horses, setHorses] = useState(initial);
   const router = useRouter();
@@ -578,6 +581,23 @@ export default function App({
       window.removeEventListener("pageshow", pull);
     };
   }, [router]);
+
+  /**
+   * Re-read the paperwork when the saved reading is old.
+   *
+   * It runs here rather than on a schedule because SharePoint access is in
+   * the name of the person signed in, and a scheduled job has nobody to be.
+   * Whoever opens the app pays for it, in the background, and the page
+   * refreshes once it lands.
+   */
+  const scanning = useRef(false);
+  useEffect(() => {
+    if (!rescan || scanning.current) return;
+    scanning.current = true;
+    fetch("/api/scan", { method: "POST" })
+      .then((r) => (r.ok ? router.refresh() : null))
+      .catch(() => {});
+  }, [rescan, router]);
 
   const [view, setView] = useState<View>("horses");
   const [filter, setFilter] = useState("all");

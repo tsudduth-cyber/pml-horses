@@ -1,6 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getHorses } from "@/lib/sharepoint";
+import { getHorses, scanState } from "@/lib/sharepoint";
 import { SEASON } from "@/lib/season";
 import App from "./App";
 import SignIn from "./SignIn";
@@ -30,7 +30,7 @@ export default async function Page() {
     const horses = await getHorses();
     return (
       <Providers>
-        <App horses={horses} season={SEASON} />
+        <App horses={horses} season={SEASON} rescan={scanState().stale} />
       </Providers>
     );
   } catch (e: any) {

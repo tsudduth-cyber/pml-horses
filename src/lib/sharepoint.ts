@@ -1,6 +1,7 @@
 import { graph, graphAll } from "./graph";
 import type { Horse, Doc, Status, CareKey, DerivedCare } from "./types";
 import { CARE_TASKS } from "./types";
+import { readScan, scanIsStale } from "./scan";
 
 const HOST = process.env.SP_HOSTNAME!;
 const DRIVE = process.env.SP_DRIVE_ID!;
@@ -22,6 +23,11 @@ const SHARED_FOLDERS = (process.env.SP_SHARED_FOLDERS ?? "Payables,AQHA")
  *  module load — the environment is not there when the build evaluates
  *  this file. */
 const pmlRoot = () => ROOT.replace(/\/[^/]+$/, "");
+
+/** Set by getHorses so the page can tell the app whether to rescan. */
+let staleScan = false;
+let lastDocIndex: { doc: Doc; ids: string[] }[] = [];
+export const scanState = () => ({ stale: staleScan, docs: lastDocIndex });
 
 /**
  * Resolve the site and list by name so nobody has to go hunting for GUIDs.
@@ -406,6 +412,34 @@ export async function getHorses(): Promise<Horse[]> {
       h.derived = { ...from, ...deriveCare([...docs, ...mine], false) };
     })
   );
+
+  // What the scanner needs: every document, and whose it is.
+  lastDocIndex = [
+    ...horses.flatMap((h) =>
+      h.docs.filter((d) => !d.folder).map((doc) => ({ doc, ids: [h.id] }))
+    ),
+    // Barn paperwork is not on any one horse's page, so it would otherwise
+    // never be read. No ids means "whoever the document names inside".
+    ...barnDocs.filter((d) => !d.folder).map((doc) => ({ doc, ids: [] as string[] })),
+  ];
+
+  // Care dates read out of the documents themselves beat ones guessed from a
+  // filename — "Sully Vet.pdf" says nothing, the invoice inside says Coggins.
+  const scan = await readScan();
+  if (scan) {
+    for (const h of horses) {
+      const hits = scan.items[h.id];
+      if (!hits) continue;
+      for (const [k, hit] of Object.entries(hits)) {
+        h.derived[k as CareKey] = {
+          date: hit.date,
+          from: hit.from,
+          barn: false,
+        };
+      }
+    }
+  }
+  staleScan = scanIsStale(scan);
 
   return horses.sort(
     (a, b) =>

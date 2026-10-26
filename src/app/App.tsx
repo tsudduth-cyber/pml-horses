@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import type { Horse, CareKey, Doc, DerivedCare } from "@/lib/types";
 import { STATUS_LABEL, CARE_TASKS, isAnimal } from "@/lib/types";
 import {
@@ -164,7 +165,14 @@ function DocLink({ d }: { d: Doc }) {
       rel="noopener noreferrer"
     >
       {d.folder ? <FolderIcon /> : <PageIcon />}
-      {d.name}
+      <span className="dn">
+        {d.name}
+        {/* When a file is replaced its name does not change, so without a
+            date an updated document looks untouched. */}
+        {!d.folder && d.modified && (
+          <span className="dm">{fmt(d.modified.slice(0, 10))}</span>
+        )}
+      </span>
     </a>
   );
 }
@@ -537,6 +545,40 @@ export default function App({
   season: { when: string; what: string; detail: string; hot: boolean }[];
 }) {
   const [horses, setHorses] = useState(initial);
+  const router = useRouter();
+
+  // Fresh data from the server replaces what is on screen. useState only
+  // reads its argument on first render, so without this a refresh fetched
+  // new horses and the page went on showing the old ones.
+  useEffect(() => setHorses(initial), [initial]);
+
+  /**
+   * Re-fetch when the app comes back to the front.
+   *
+   * On iOS a home-screen app resuming from the background restores the last
+   * rendered screen rather than reloading, so Philip could tap the icon and
+   * read days-old data with nothing telling him it was stale. Refresh on
+   * return, and at most once a minute so flicking between apps does not
+   * hammer SharePoint.
+   */
+  const lastPull = useRef(Date.now());
+  useEffect(() => {
+    const pull = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastPull.current < 60_000) return;
+      lastPull.current = Date.now();
+      router.refresh();
+    };
+    document.addEventListener("visibilitychange", pull);
+    window.addEventListener("focus", pull);
+    window.addEventListener("pageshow", pull);
+    return () => {
+      document.removeEventListener("visibilitychange", pull);
+      window.removeEventListener("focus", pull);
+      window.removeEventListener("pageshow", pull);
+    };
+  }, [router]);
+
   const [view, setView] = useState<View>("horses");
   const [filter, setFilter] = useState("all");
   const [openId, setOpenId] = useState<string | null>(null);

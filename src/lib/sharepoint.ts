@@ -8,6 +8,20 @@ const LIST_NAME = process.env.SP_LIST_NAME ?? "PML Horses";
 const ROOT = process.env.SP_HORSES_PATH!;
 /** Whole-barn paperwork lives here — one farrier invoice covers everyone. */
 const BARN_FOLDER = process.env.SP_BARN_FOLDER ?? "_Barn";
+/**
+ * Folders outside /Horses/ that still hold horse paperwork. Payables is
+ * filed by month for the books and AQHA by subject — correct for the people
+ * who keep them, and not something to reorganise for an app. The app reads
+ * them instead and hangs each file on the horse its name mentions.
+ */
+const SHARED_FOLDERS = (process.env.SP_SHARED_FOLDERS ?? "Payables,AQHA")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+/** The PML folder that /Horses/ sits inside. Resolved per call, not at
+ *  module load — the environment is not there when the build evaluates
+ *  this file. */
+const pmlRoot = () => ROOT.replace(/\/[^/]+$/, "");
 
 /**
  * Resolve the site and list by name so nobody has to go hunting for GUIDs.
@@ -190,6 +204,34 @@ async function readFolder(folderName: string) {
 }
 
 /**
+ * Read a folder and everything under it.
+ *
+ * Payables is filed by month and AQHA by subject, so the paperwork for a
+ * horse sits a level or two down. Depth is capped because this walks on
+ * every page load and nothing here is filed deeper than that.
+ */
+async function readTree(path: string, depth = 2): Promise<Doc[]> {
+  const enc = encodeURIComponent(path).replace(/%2F/g, "/");
+  let children: any[] = [];
+  try {
+    const res: any = await graph(`/drives/${DRIVE}/root:/${enc}:/children?$top=200`);
+    children = res.value ?? [];
+  } catch {
+    return []; // a folder that is not there is not an error
+  }
+
+  const files = children.filter((c) => !c.folder).map(toDoc);
+  if (depth <= 0) return files;
+
+  const deeper = await Promise.all(
+    children
+      .filter((c) => c.folder)
+      .map((c) => readTree(`${path}/${c.name}`, depth - 1))
+  );
+  return files.concat(...deeper);
+}
+
+/**
  * Pull a date out of a filename. The filing standard is m.d.yy — "Sully
  * Coggins 10.13.26.pdf" — and that is what this looks for first. It also
  * takes m-d-yy and an ISO date, because people type what they type.
@@ -311,12 +353,22 @@ function folderWebUrl(folderName: string): string {
  * for the documents and photos. Folders are read in parallel.
  */
 export async function getHorses(): Promise<Horse[]> {
-  const [horses, barnDocs] = await Promise.all([
+  const [horses, barnDocs, sharedDocs] = await Promise.all([
     readList(),
     // One farrier visit does the whole barn and produces one invoice, so
     // whole-barn paperwork is filed once here rather than copied 22 times.
     readFolder(BARN_FOLDER).then((f) => f.docs),
+    Promise.all(
+      SHARED_FOLDERS.map((f) => readTree(`${pmlRoot()}/${f}`))
+    ).then((r) => r.flat()),
   ]);
+
+  // A shared document belongs to whichever horses its filename mentions.
+  // One that names nobody belongs to nobody — unlike barn paperwork, a
+  // credit card statement is not everyone's.
+  const shared = sharedDocs
+    .map((d) => ({ doc: d, only: namedHorses(d.name, horses) }))
+    .filter((e) => e.only);
 
   // Work out who each barn document is about once, not once per horse.
   const barn = careEntries(barnDocs).map((e) => ({
@@ -337,14 +389,21 @@ export async function getHorses(): Promise<Horse[]> {
       }
 
       if (!h.folderName) {
-        h.derived = from;
+        // No folder of her own, but shared paperwork can still name her.
+        const mine = shared.filter((e) => e.only!.has(h.id)).map((e) => e.doc);
+        h.docs = mine;
+        h.derived = { ...from, ...deriveCare(mine, false) };
         return;
       }
       const { docs, photos } = await readFolder(h.folderName);
-      h.docs = docs;
+      const mine = shared.filter((e) => e.only!.has(h.id)).map((e) => e.doc);
+      h.docs = [...docs, ...mine].sort(
+        (a, b) =>
+          Number(b.folder) - Number(a.folder) || a.name.localeCompare(b.name)
+      );
       h.photos = photos;
       h.folderUrl = folderWebUrl(h.folderName);
-      h.derived = { ...from, ...deriveCare(docs, false) };
+      h.derived = { ...from, ...deriveCare([...docs, ...mine], false) };
     })
   );
 

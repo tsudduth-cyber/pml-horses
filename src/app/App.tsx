@@ -177,6 +177,102 @@ function DocLink({ d }: { d: Doc }) {
   );
 }
 
+
+/* ---------- editable notes ---------- */
+
+/**
+ * Notes and the missing-items list, editable in place.
+ *
+ * These lived in a Word document because the app gave the office nowhere
+ * to write them, and the two drifted apart. One line per note; an empty
+ * line is dropped on save.
+ */
+function Lines({
+  horse,
+  field,
+  label,
+  lines,
+  tone,
+  onSave,
+}: {
+  horse: Horse;
+  field: "notes" | "missing";
+  label: string;
+  lines: string[];
+  tone?: "alert";
+  onSave: (field: "notes" | "missing", lines: string[]) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const start = () => {
+    setDraft(lines.join("\n"));
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    await onSave(field, draft.split("\n"));
+    setBusy(false);
+    setEditing(false);
+  };
+
+  if (!editing && !lines.length) {
+    return (
+      <button className="addnote" onClick={start}>
+        + Add {label.toLowerCase()}
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <div className="lhead">
+        <h3>{label}</h3>
+        {!editing && (
+          <button className="edit" onClick={start}>
+            Edit
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <>
+          <textarea
+            className="lines"
+            value={draft}
+            disabled={busy}
+            rows={Math.max(4, draft.split("\n").length + 1)}
+            onChange={(e) => setDraft(e.target.value)}
+            aria-label={`${label} for ${displayName(horse)}`}
+          />
+          <div className="lacts">
+            <button className="prim" disabled={busy} onClick={save}>
+              Save
+            </button>
+            <button
+              className="cancel"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : tone === "alert" ? (
+        <ul>
+          {lines.map((m, i) => (
+            <li key={i}>{m}</li>
+          ))}
+        </ul>
+      ) : (
+        lines.map((n, i) => <p key={i}>{n}</p>)
+      )}
+    </>
+  );
+}
+
 /* ---------- care editor ---------- */
 
 function CareRow({
@@ -344,12 +440,14 @@ function Detail({
   showMoney,
   onBack,
   onSave,
+  onSaveText,
   onShare,
 }: {
   horse: Horse;
   showMoney: boolean;
   onBack: () => void;
   onSave: (key: CareKey, date: string | null) => Promise<void>;
+  onSaveText: (field: "notes" | "missing", lines: string[]) => Promise<void>;
   onShare: () => void;
 }) {
   const [shot, setShot] = useState(0);
@@ -467,27 +565,28 @@ function Detail({
         </section>
       )}
 
-      {h.notes.length > 0 && (
-        <section className="sec notes">
-          <h3>NOTES</h3>
-          {h.notes.map((n, i) => (
-            <p key={i}>{n}</p>
-          ))}
-        </section>
-      )}
+      <section className="sec notes">
+        <Lines
+          horse={h}
+          field="notes"
+          label="NOTES"
+          lines={h.notes}
+          onSave={onSaveText}
+        />
+      </section>
 
-      {h.missing.length > 0 && (
-        <section className="sec">
-          <div className="missing">
-            <h4>STILL MISSING</h4>
-            <ul>
-              {h.missing.map((m, i) => (
-                <li key={i}>{m}</li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      )}
+      <section className="sec">
+        <div className={h.missing.length ? "missing" : undefined}>
+          <Lines
+            horse={h}
+            field="missing"
+            label="STILL MISSING"
+            lines={h.missing}
+            tone="alert"
+            onSave={onSaveText}
+          />
+        </div>
+      </section>
 
       {h.docs.length > 0 && (
         <section className="sec">
@@ -652,6 +751,32 @@ export default function App({
     [horses, toast]
   );
 
+  /* Notes and missing items — optimistic, reverted if SharePoint refuses */
+  const saveText = useCallback(
+    async (horseId: string, field: "notes" | "missing", lines: string[]) => {
+      const before = horses.find((h) => h.id === horseId)?.[field] ?? [];
+      const clean = lines.map((l) => l.trim()).filter(Boolean);
+      setHorses((hs) =>
+        hs.map((h) => (h.id === horseId ? { ...h, [field]: clean } : h))
+      );
+      try {
+        const res = await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: horseId, field, lines: clean }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error ?? "Failed");
+        toast("Saved");
+      } catch (e: any) {
+        setHorses((hs) =>
+          hs.map((h) => (h.id === horseId ? { ...h, [field]: before } : h))
+        );
+        toast(e?.message ?? "Didn't save");
+      }
+    },
+    [horses, toast]
+  );
+
   /* Recent — built from the real file dates in SharePoint */
   const recent = useMemo(() => {
     const all: { date: string; name: string; horse: string; url: string }[] = [];
@@ -801,6 +926,7 @@ export default function App({
             showMoney={showMoney}
             onBack={() => setView("horses")}
             onSave={(k, d) => saveCare(open.id, k, d)}
+            onSaveText={(f, l) => saveText(open.id, f, l)}
             onShare={() => setShareId(open.id)}
           />
         )}

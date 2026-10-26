@@ -477,3 +477,33 @@ export async function saveCareDate(
     body: JSON.stringify({ [column]: date }),
   });
 }
+
+/** The text fields the app may rewrite. Everything else stays read-only. */
+const TEXT_COLUMN = { notes: "Notes", missing: "Missing" } as const;
+export type TextKey = keyof typeof TEXT_COLUMN;
+
+/**
+ * Rewrite a horse's notes.
+ *
+ * The office kept these in a Word document because the app gave them
+ * nowhere else to write, and the two drifted apart over ten days. This is
+ * the somewhere else. Lines are stored one per line, which is what the
+ * reader already splits on.
+ */
+export async function saveLines(itemId: string, key: TextKey, lines: string[]) {
+  const column = TEXT_COLUMN[key];
+  if (!column) throw new Error("BAD_FIELD");
+
+  const clean = lines
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .slice(0, 40);
+  if (clean.some((l) => l.length > 600)) throw new Error("TOO_LONG");
+
+  const { site, list } = await resolveIds();
+  await graph(`/sites/${site}/lists/${list}/items/${itemId}/fields`, {
+    method: "PATCH",
+    body: JSON.stringify({ [column]: clean.join("\n") }),
+  });
+  return clean;
+}

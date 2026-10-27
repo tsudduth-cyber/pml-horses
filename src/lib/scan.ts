@@ -16,8 +16,21 @@ export interface ScanHit {
   line: string;
 }
 
+/**
+ * Bumped whenever the reading changes — a new folder comes into view, a
+ * keyword is added, the matching is corrected. A saved scan from an older
+ * version is wrong rather than merely old, so it is redone on the next
+ * open instead of being trusted for another four hours.
+ *
+ * 2: read every folder beside /Horses/, credit a horse named on either
+ *    side of the service word, count half sets and pads as farrier work.
+ */
+export const SCAN_VERSION = 2;
+
 export interface Scan {
   at: string;
+  /** The reading that produced it. See SCAN_VERSION. */
+  v?: number;
   /** horse id → care key → what the paperwork says. */
   items: Record<string, Partial<Record<CareKey, ScanHit>>>;
 }
@@ -50,6 +63,7 @@ export const STALE_MS = 4 * 60 * 60 * 1000;
 
 export function scanIsStale(scan: Scan | null) {
   if (!scan) return true;
+  if ((scan.v ?? 1) !== SCAN_VERSION) return true;
   const at = Date.parse(scan.at);
   return !Number.isFinite(at) || Date.now() - at > STALE_MS;
 }
@@ -243,7 +257,7 @@ export async function runScan(
     })
   );
 
-  const scan: Scan = { at: new Date().toISOString(), items };
+  const scan: Scan = { at: new Date().toISOString(), v: SCAN_VERSION, items };
   try {
     await writeScan(scan);
   } catch {

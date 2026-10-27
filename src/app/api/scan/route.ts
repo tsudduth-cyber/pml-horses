@@ -13,11 +13,18 @@ export const maxDuration = 60;
  * after it goes stale pays for the refresh, and everyone after reads the
  * saved result.
  */
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    // A saved scan is only reread for four hours, which is right for normal
+    // use. But when the reading itself changes — a new folder comes into
+    // view, a keyword gets added — the saved answer is wrong rather than
+    // merely old, and waiting out the clock means showing Philip dates we
+    // already know are stale.
+    const force = new URL(req.url).searchParams.get("force") === "1";
+
     const horses = await getHorses();
     const { stale, docs } = scanState();
-    if (!stale) return Response.json({ ok: true, skipped: "fresh" });
+    if (!stale && !force) return Response.json({ ok: true, skipped: "fresh" });
 
     const scan = await runScan(horses, docs);
     const found = Object.values(scan.items).reduce(

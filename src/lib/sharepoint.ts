@@ -412,6 +412,10 @@ export async function getHorses(): Promise<Horse[]> {
       ? { ...row }
       : {
           ...EMPTY_HORSE,
+          // Fresh collections per horse. The spread is shallow, so without
+          // these every folder-driven horse would share one notes array and
+          // one care object with all the others.
+          notes: [], missing: [], care: {}, derived: {}, docs: [], photos: [],
           id: `folder:${folder}`,
           status: folder.startsWith(`${SOLD_FOLDER}/`) ? "off" : "wip",
         };
@@ -491,7 +495,13 @@ export async function getHorses(): Promise<Horse[]> {
   const scan = await readScan();
   if (scan) {
     for (const h of horses) {
-      const hits = scan.items[h.id];
+      // A horse found only as a folder is keyed by her folder until the
+      // first write gives her a record and a numeric id. Without the
+      // fallback, that first write silently drops everything the scanner
+      // read out of her paperwork until the next rescan.
+      const hits =
+        scan.items[h.id] ??
+        (h.folderName ? scan.items[`folder:${h.folderName}`] : undefined);
       if (!hits) continue;
       for (const [k, hit] of Object.entries(hits)) {
         h.derived[k as CareKey] = {

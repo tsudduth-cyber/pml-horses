@@ -106,6 +106,19 @@ function displayName(h: Horse) {
   return h.barn || h.reg || h.idline || "Name pending";
 }
 
+/**
+ * Which horse is already showing under each folder, so the record editor
+ * can say that picking it merges rather than moves.
+ */
+function heldBy(horses: Horse[], exceptId: string) {
+  const out: Record<string, string> = {};
+  for (const h of horses) {
+    if (h.id === exceptId || !h.folderName) continue;
+    out[h.folderName.toLowerCase()] = displayName(h);
+  }
+  return out;
+}
+
 function subLine(h: Horse) {
   if (h.pending) return h.idline ?? "";
   if (h.barn && h.reg && h.barn !== h.reg) return h.reg;
@@ -204,11 +217,14 @@ type RecordKey = (typeof RECORD_FIELDS)[number]["key"];
 function RecordEditor({
   horse,
   folders,
+  heldBy = {},
   onSave,
 }: {
   horse: Horse;
-  /** Folders under /Horses/ that no horse has claimed. */
+  /** Every horse folder under /Horses/. */
   folders: string[];
+  /** Folder name, lowercased, to the horse already showing under it. */
+  heldBy?: Record<string, string>;
   onSave: (patch: Partial<Record<RecordKey, string | null>>) => Promise<void>;
 }) {
   const current = (k: RecordKey) => (horse as any)[k] ?? "";
@@ -236,6 +252,14 @@ function RecordEditor({
       ? [horse.folderName]
       : []),
   ].sort();
+
+  // Picking a folder another horse is already showing under folds this
+  // record into that one. Say so before the tap, not after.
+  const picked = draft.folderName ?? current("folderName");
+  const mergeWith =
+    picked && picked !== horse.folderName
+      ? heldBy[String(picked).toLowerCase()]
+      : undefined;
 
   return (
     <div className="recedit">
@@ -274,6 +298,11 @@ function RecordEditor({
           )}
         </label>
       ))}
+      {mergeWith && (
+        <p className="rmerge">
+          Saving folds this record into {mergeWith}. Notes from both are kept.
+        </p>
+      )}
       <div className="lacts">
         <button className="prim" disabled={busy} onClick={save}>
           Save
@@ -548,6 +577,7 @@ function Detail({
   onSaveText,
   onSaveRecord,
   folders,
+  heldBy,
   onShare,
 }: {
   horse: Horse;
@@ -557,6 +587,7 @@ function Detail({
   onSaveText: (field: "notes" | "missing", lines: string[]) => Promise<void>;
   onSaveRecord: (patch: Record<string, string | null>) => Promise<void>;
   folders: string[];
+  heldBy: Record<string, string>;
   onShare: () => void;
 }) {
   const [shot, setShot] = useState(0);
@@ -651,6 +682,7 @@ function Detail({
           <RecordEditor
             horse={h}
             folders={folders}
+            heldBy={heldBy}
             onSave={async (p) => {
               await onSaveRecord(p as Record<string, string | null>);
               setEditRec(false);
@@ -772,7 +804,7 @@ export default function App({
   season: { when: string; what: string; detail: string; hot: boolean }[];
   /** The saved reading of the paperwork has gone stale. */
   rescan?: boolean;
-  /** Folders under /Horses/ that no horse has claimed yet. */
+  /** Every horse folder under /Horses/, for the folder picker. */
   folders?: string[];
 }) {
   const [horses, setHorses] = useState(initial);
@@ -1077,6 +1109,7 @@ export default function App({
             onSaveText={(f, l) => saveText(open.id, f, l)}
             onSaveRecord={(p) => saveRecord(open.id, p)}
             folders={folders}
+            heldBy={heldBy(horses, open.id)}
             onShare={() => setShareId(open.id)}
           />
         )}

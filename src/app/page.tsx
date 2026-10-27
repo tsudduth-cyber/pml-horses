@@ -1,6 +1,6 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getHorses, scanState, unlinkedFolders } from "@/lib/sharepoint";
+import { getHorses, scanState, allFolders } from "@/lib/sharepoint";
 import { SEASON } from "@/lib/season";
 import App from "./App";
 import SignIn from "./SignIn";
@@ -28,7 +28,7 @@ export default async function Page() {
 
   try {
     const horses = await getHorses();
-    const folders = await unlinkedFolders(horses);
+    const folders = await allFolders();
     return (
       <Providers>
         <App

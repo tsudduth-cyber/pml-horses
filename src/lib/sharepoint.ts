@@ -653,38 +653,138 @@ export async function saveRecord(
 
   const row = await resolveItemId(itemId);
   const { site, list } = await resolveIds();
+
+  // Pointing a record at a folder another record already holds is a merge,
+  // not a rename. Two records for one horse is exactly the mess this is
+  // meant to clear up, and the stray is usually the one carrying the note
+  // nobody wants to lose — so its content moves over before it goes.
+  const moveTo =
+    typeof patch.folderName === "string" ? patch.folderName.trim() : "";
+  if (moveTo) {
+    const held = await rowHoldingFolder(moveTo, row);
+    if (held) {
+      await mergeRows(held, row, fields);
+      return;
+    }
+    // Moving a record onto a folder renames the horse — that is the point
+    // of folders driving the roster. A barn name the new folder doesn't
+    // mention is left over from the old one ("New recip" on the Appaloosa
+    // Recip folder), and keeping it would leave her listed under the wrong
+    // name after the very save meant to fix that. A nickname the folder
+    // does carry stays.
+    if (!("barn" in patch)) {
+      const current = await graph<any>(
+        `/sites/${site}/lists/${list}/items/${row}?expand=fields`
+      ).catch(() => null);
+      const was = String(current?.fields?.BarnName ?? "").trim();
+      if (was && !moveTo.toLowerCase().includes(was.toLowerCase())) {
+        fields.BarnName = null;
+      }
+    }
+  }
+
   await graph(`/sites/${site}/lists/${list}/items/${row}/fields`, {
     method: "PATCH",
     body: JSON.stringify(fields),
   });
 }
 
-/**
- * Folders under /Horses/ that no horse in the list points at.
- *
- * A new horse arrives as a new folder — "Appaloosa Recip" — and until some
- * row claims it, the app cannot show it. Surfacing the orphans is how that
- * stops being invisible.
- */
-export async function unlinkedFolders(horses: Horse[]): Promise<string[]> {
-  const taken = new Set(
-    horses.map((h) => (h.folderName ?? "").toLowerCase()).filter(Boolean)
+/** The list item already pointing at `folder`, if it isn't `exceptId`. */
+async function rowHoldingFolder(folder: string, exceptId: string) {
+  const { site, list } = await resolveIds();
+  const items = await graphAll<any>(
+    `/sites/${site}/lists/${list}/items?expand=fields&$top=200`
   );
-  try {
-    const enc = encodeURIComponent(ROOT).replace(/%2F/g, "/");
-    const res: any = await graph(
-      `/drives/${DRIVE}/root:/${enc}:/children?$top=200`
-    );
-    return (res.value ?? [])
-      .filter(
-        (c: any) =>
-          c.folder &&
-          !c.name.startsWith("_") &&
-          !taken.has(String(c.name).toLowerCase())
-      )
-      .map((c: any) => c.name as string)
-      .sort();
-  } catch {
-    return [];
+  return (
+    items.find(
+      (it) =>
+        String(it.id) !== String(exceptId) &&
+        String(it.fields?.FolderName ?? "").toLowerCase() ===
+          folder.toLowerCase()
+    ) ?? null
+  );
+}
+
+/**
+ * Columns worth carrying when two records turn out to be one horse.
+ *
+ * Name and barn name are deliberately absent. The target is the record
+ * holding the folder, and the folder is what names a horse — carrying a
+ * stale "New recip" over the top of "Appaloosa Recip" would undo the very
+ * thing the merge is for. The source contributes history, not identity.
+ */
+const MERGE_COLUMNS = [
+  "IdLine", "AQHA", "Sex", "Color", "Foaled",
+  "Bought", "BoughtNote", "Price", "SalePrice", "SoldOn", "Status",
+  "StatusNote", "Pedigree", "BreedingTo", "Farrier", "Deworm", "Vax",
+  "Coggins", "Dental",
+];
+
+const empty = (v: unknown) =>
+  v === null || v === undefined || String(v).trim() === "";
+
+/**
+ * Fold `sourceId` into `targetId` and delete the source.
+ *
+ * The target keeps everything it already has — it is the one with the
+ * folder, so it is the one the office is maintaining. The source fills in
+ * the blanks, and notes are unioned rather than chosen between, because a
+ * line like "believed to carry Embryo 2" exists in exactly one place.
+ *
+ * The copy is confirmed before the delete. If the delete fails the stray
+ * record simply shows up again, which is visible and fixable; the reverse
+ * order would lose it.
+ */
+async function mergeRows(
+  target: any,
+  sourceId: string,
+  pending: Record<string, unknown>
+) {
+  const { site, list } = await resolveIds();
+  const src: any = await graph(
+    `/sites/${site}/lists/${list}/items/${sourceId}?expand=fields`
+  );
+  const from = { ...(src.fields ?? {}), ...pending };
+  const have = target.fields ?? {};
+
+  const patch: Record<string, unknown> = {};
+  for (const col of MERGE_COLUMNS) {
+    if (empty(have[col]) && !empty(from[col])) patch[col] = from[col];
   }
+
+  for (const col of ["Notes", "Missing"]) {
+    const merged = [...lines(have[col]), ...lines(from[col])];
+    const seen = new Set<string>();
+    const kept = merged.filter((l) => {
+      const k = l.trim().toLowerCase();
+      if (!k || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    if (kept.length > lines(have[col]).length) patch[col] = kept.join("\n");
+  }
+
+  if (Object.keys(patch).length) {
+    await graph(`/sites/${site}/lists/${list}/items/${target.id}/fields`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  await graph(`/sites/${site}/lists/${list}/items/${sourceId}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Every horse folder under /Horses/, for the folder picker.
+ *
+ * This used to list only the folders no record pointed at, which made sense
+ * when the list was the roster. Now the folders are the roster, so every
+ * folder is claimed by its own horse and that list was always empty — there
+ * was no way to put a stray record onto the folder it belongs to. Offering
+ * all of them is what makes the merge reachable.
+ */
+export async function allFolders(): Promise<string[]> {
+  return (await horseFolders()).sort();
 }

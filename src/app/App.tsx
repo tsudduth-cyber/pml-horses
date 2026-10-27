@@ -178,6 +178,111 @@ function DocLink({ d }: { d: Doc }) {
 }
 
 
+
+/* ---------- the record, editable ---------- */
+
+const RECORD_FIELDS = [
+  { key: "barn", label: "Barn name", type: "text" },
+  { key: "reg", label: "Registered name", type: "text" },
+  { key: "aqha", label: "AQHA number", type: "text" },
+  { key: "sex", label: "Sex", type: "sex" },
+  { key: "color", label: "Color", type: "text" },
+  { key: "dob", label: "Foaled", type: "date" },
+  { key: "bought", label: "Bought", type: "date" },
+  { key: "folderName", label: "SharePoint folder", type: "folder" },
+] as const;
+
+type RecordKey = (typeof RECORD_FIELDS)[number]["key"];
+
+/**
+ * The record, editable in place.
+ *
+ * Every one of these used to be seeded once and then frozen. A horse could
+ * be renamed, given a folder and photographed and the app would go on
+ * showing the old record, because there was no way to reach it.
+ */
+function RecordEditor({
+  horse,
+  folders,
+  onSave,
+}: {
+  horse: Horse;
+  /** Folders under /Horses/ that no horse has claimed. */
+  folders: string[];
+  onSave: (patch: Partial<Record<RecordKey, string | null>>) => Promise<void>;
+}) {
+  const current = (k: RecordKey) => (horse as any)[k] ?? "";
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+
+  const set = (k: string, v: string) => setDraft((d) => ({ ...d, [k]: v }));
+
+  const save = async () => {
+    const patch: Record<string, string | null> = {};
+    for (const f of RECORD_FIELDS) {
+      const was = String(current(f.key));
+      const now = draft[f.key] ?? was;
+      if (now !== was) patch[f.key] = now || null;
+    }
+    if (!Object.keys(patch).length) return;
+    setBusy(true);
+    await onSave(patch);
+    setBusy(false);
+  };
+
+  const options = [
+    ...folders,
+    ...(horse.folderName && !folders.includes(horse.folderName)
+      ? [horse.folderName]
+      : []),
+  ].sort();
+
+  return (
+    <div className="recedit">
+      {RECORD_FIELDS.map((f) => (
+        <label className="rf" key={f.key}>
+          <span>{f.label}</span>
+          {f.type === "sex" ? (
+            <select
+              value={draft[f.key] ?? current(f.key)}
+              disabled={busy}
+              onChange={(e) => set(f.key, e.target.value)}
+            >
+              <option value="">—</option>
+              {["Stallion", "Mare", "Gelding", "Filly", "Colt"].map((o) => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          ) : f.type === "folder" ? (
+            <select
+              value={draft[f.key] ?? current(f.key)}
+              disabled={busy}
+              onChange={(e) => set(f.key, e.target.value)}
+            >
+              <option value="">No folder</option>
+              {options.map((o) => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type={f.type === "date" ? "date" : "text"}
+              value={draft[f.key] ?? current(f.key)}
+              disabled={busy}
+              onChange={(e) => set(f.key, e.target.value)}
+            />
+          )}
+        </label>
+      ))}
+      <div className="lacts">
+        <button className="prim" disabled={busy} onClick={save}>
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- editable notes ---------- */
 
 /**
@@ -441,6 +546,8 @@ function Detail({
   onBack,
   onSave,
   onSaveText,
+  onSaveRecord,
+  folders,
   onShare,
 }: {
   horse: Horse;
@@ -448,9 +555,12 @@ function Detail({
   onBack: () => void;
   onSave: (key: CareKey, date: string | null) => Promise<void>;
   onSaveText: (field: "notes" | "missing", lines: string[]) => Promise<void>;
+  onSaveRecord: (patch: Record<string, string | null>) => Promise<void>;
+  folders: string[];
   onShare: () => void;
 }) {
   const [shot, setShot] = useState(0);
+  const [editRec, setEditRec] = useState(false);
   const h = horse;
 
   const rows: [string, string | null, string][] = [
@@ -531,15 +641,31 @@ function Detail({
       </div>
 
       <section className="sec">
-        <h3>RECORD</h3>
-        <dl>
-          {rows.map(([k, v, fallback]) => (
-            <div className="kv" key={k}>
-              <dt>{k}</dt>
-              <dd className={v ? "" : "miss"}>{v || fallback}</dd>
-            </div>
-          ))}
-        </dl>
+        <div className="lhead">
+          <h3>RECORD</h3>
+          <button className="edit" onClick={() => setEditRec((v) => !v)}>
+            {editRec ? "Done" : "Edit"}
+          </button>
+        </div>
+        {editRec ? (
+          <RecordEditor
+            horse={h}
+            folders={folders}
+            onSave={async (p) => {
+              await onSaveRecord(p as Record<string, string | null>);
+              setEditRec(false);
+            }}
+          />
+        ) : (
+          <dl>
+            {rows.map(([k, v, fallback]) => (
+              <div className="kv" key={k}>
+                <dt>{k}</dt>
+                <dd className={v ? "" : "miss"}>{v || fallback}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </section>
 
       {h.breeding && (
@@ -640,11 +766,14 @@ export default function App({
   horses: initial,
   season,
   rescan,
+  folders = [],
 }: {
   horses: Horse[];
   season: { when: string; what: string; detail: string; hot: boolean }[];
   /** The saved reading of the paperwork has gone stale. */
   rescan?: boolean;
+  /** Folders under /Horses/ that no horse has claimed yet. */
+  folders?: string[];
 }) {
   const [horses, setHorses] = useState(initial);
   const router = useRouter();
@@ -775,6 +904,25 @@ export default function App({
       }
     },
     [horses, toast]
+  );
+
+  /* Record fields — a reload follows, because a rename changes the list */
+  const saveRecord = useCallback(
+    async (horseId: string, patch: Record<string, string | null>) => {
+      try {
+        const res = await fetch("/api/record", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: horseId, fields: patch }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error ?? "Failed");
+        toast("Saved");
+        router.refresh();
+      } catch (e: any) {
+        toast(e?.message ?? "Didn't save");
+      }
+    },
+    [toast, router]
   );
 
   /* Recent — built from the real file dates in SharePoint */
@@ -927,6 +1075,8 @@ export default function App({
             onBack={() => setView("horses")}
             onSave={(k, d) => saveCare(open.id, k, d)}
             onSaveText={(f, l) => saveText(open.id, f, l)}
+            onSaveRecord={(p) => saveRecord(open.id, p)}
+            folders={folders}
             onShare={() => setShareId(open.id)}
           />
         )}

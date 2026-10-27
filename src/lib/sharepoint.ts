@@ -507,3 +507,90 @@ export async function saveLines(itemId: string, key: TextKey, lines: string[]) {
   });
   return clean;
 }
+
+/**
+ * The record fields the app may rewrite, and the column each one lands in.
+ *
+ * Everything here used to be seeded once and then frozen — a horse could be
+ * renamed in SharePoint, given a folder and photographed, and the app would
+ * go on showing the old record because nobody could reach it. This is how
+ * it gets reached.
+ */
+const RECORD_COLUMN = {
+  barn: "BarnName",
+  reg: "Title",
+  aqha: "AQHA",
+  sex: "Sex",
+  color: "Color",
+  dob: "Foaled",
+  bought: "Bought",
+  folderName: "FolderName",
+} as const;
+export type RecordKey = keyof typeof RECORD_COLUMN;
+
+const SEXES = ["Stallion", "Mare", "Gelding", "Filly", "Colt"];
+const DATE_KEYS: RecordKey[] = ["dob", "bought"];
+
+export async function saveRecord(
+  itemId: string,
+  patch: Partial<Record<RecordKey, string | null>>
+) {
+  const fields: Record<string, unknown> = {};
+
+  for (const [k, v] of Object.entries(patch) as [RecordKey, string | null][]) {
+    const column = RECORD_COLUMN[k];
+    if (!column) throw new Error("BAD_FIELD");
+    const val = typeof v === "string" ? v.trim() : v;
+
+    if (!val) {
+      fields[column] = null;
+      continue;
+    }
+    if (DATE_KEYS.includes(k) && !/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      throw new Error("BAD_DATE");
+    }
+    if (k === "sex" && !SEXES.includes(val)) throw new Error("BAD_SEX");
+    if (val.length > 255) throw new Error("TOO_LONG");
+    // Dates go in at noon UTC so no timezone can roll them back a day.
+    fields[column] = DATE_KEYS.includes(k) ? `${val}T12:00:00Z` : val;
+  }
+
+  // A horse with a registered name is no longer awaiting one.
+  if ("reg" in patch) fields.NamePending = !patch.reg;
+
+  const { site, list } = await resolveIds();
+  await graph(`/sites/${site}/lists/${list}/items/${itemId}/fields`, {
+    method: "PATCH",
+    body: JSON.stringify(fields),
+  });
+}
+
+/**
+ * Folders under /Horses/ that no horse in the list points at.
+ *
+ * A new horse arrives as a new folder — "Appaloosa Recip" — and until some
+ * row claims it, the app cannot show it. Surfacing the orphans is how that
+ * stops being invisible.
+ */
+export async function unlinkedFolders(horses: Horse[]): Promise<string[]> {
+  const taken = new Set(
+    horses.map((h) => (h.folderName ?? "").toLowerCase()).filter(Boolean)
+  );
+  try {
+    const enc = encodeURIComponent(ROOT).replace(/%2F/g, "/");
+    const res: any = await graph(
+      `/drives/${DRIVE}/root:/${enc}:/children?$top=200`
+    );
+    return (res.value ?? [])
+      .filter(
+        (c: any) =>
+          c.folder &&
+          !c.name.startsWith("_") &&
+          !taken.has(String(c.name).toLowerCase())
+      )
+      .map((c: any) => c.name as string)
+      .sort();
+  } catch {
+    return [];
+  }
+}

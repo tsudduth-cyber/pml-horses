@@ -315,3 +315,11 @@ a.btn{text-decoration:none;text-align:center;display:block}
   color:var(--paper);border:0;border-radius:1px;cursor:pointer}
 .lacts .cancel{font:inherit;font-size:13px;color:var(--mute);background:none;border:0;cursor:pointer}
 .lacts button:disabled{opacity:.45}
+
+/* The record, editable in place. */
+.recedit .rf{display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--paper-2)}
+.recedit .rf span{flex:0 0 42%;font-size:13.5px;color:var(--soft)}
+.recedit .rf input,.recedit .rf select{flex:1;min-width:0;font:inherit;font-size:14px;font-family:var(--sans);
+  padding:7px 8px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);border-radius:1px}
+.recedit .rf input:focus,.recedit .rf select:focus{outline:2px solid var(--leather);outline-offset:-1px}
+.recedit .lacts{margin-top:14px}

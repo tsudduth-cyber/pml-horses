@@ -123,3 +123,13 @@ export const CARE_TASKS: {
 export function isAnimal(h: Horse) {
   return h.status !== "off" && h.status !== "exp";
 }
+
+/** A horse the app found as a folder, before any record is attached. */
+export const EMPTY_HORSE: Horse = {
+  id: "", reg: null, barn: null, pending: false, idline: null, aqha: null,
+  sex: null, color: null, dob: null, bought: null, boughtNote: null,
+  price: null, salePrice: null, soldOn: null, status: "wip", label: null,
+  pedigree: null, breeding: null, notes: [], missing: [], care: {},
+  derived: {}, folderName: null, folderUrl: null, docs: [], photos: [],
+  sort: 900,
+};

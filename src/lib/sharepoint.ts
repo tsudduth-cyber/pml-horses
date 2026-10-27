@@ -1,7 +1,8 @@
 import { graph, graphAll } from "./graph";
 import type { Horse, Doc, Status, CareKey, DerivedCare } from "./types";
-import { CARE_TASKS } from "./types";
+import { CARE_TASKS, EMPTY_HORSE } from "./types";
 import { readScan, scanIsStale } from "./scan";
+import { parseFolder, matchRow } from "./roster";
 
 const HOST = process.env.SP_HOSTNAME!;
 const DRIVE = process.env.SP_DRIVE_ID!;
@@ -9,6 +10,7 @@ const LIST_NAME = process.env.SP_LIST_NAME ?? "PML Horses";
 const ROOT = process.env.SP_HORSES_PATH!;
 /** Whole-barn paperwork lives here — one farrier invoice covers everyone. */
 const BARN_FOLDER = process.env.SP_BARN_FOLDER ?? "_Barn";
+const SOLD_FOLDER = process.env.SP_SOLD_FOLDER ?? "x_Sold Horses";
 /**
  * Folders outside /Horses/ that still hold horse paperwork. Payables is
  * filed by month for the books and AQHA by subject — correct for the people
@@ -358,9 +360,31 @@ function folderWebUrl(folderName: string): string {
  * Everything the app needs, in one pass: the list for the facts, each folder
  * for the documents and photos. Folders are read in parallel.
  */
+
+/** Folder names under /Horses/, including the sold ones a level down. */
+async function horseFolders(): Promise<string[]> {
+  const list = async (path: string) => {
+    try {
+      const enc = encodeURIComponent(path).replace(/%2F/g, "/");
+      const res: any = await graph(`/drives/${DRIVE}/root:/${enc}:/children?$top=200`);
+      return (res.value ?? []).filter((c: any) => c.folder).map((c: any) => c.name as string);
+    } catch {
+      return [] as string[];
+    }
+  };
+  const top = await list(ROOT);
+  const sold = top.includes(SOLD_FOLDER) ? await list(`${ROOT}/${SOLD_FOLDER}`) : [];
+  return [
+    // Folders starting with _ are the app's own and shared material.
+    ...top.filter((n: string) => !n.startsWith("_") && n !== SOLD_FOLDER),
+    ...sold.map((n: string) => `${SOLD_FOLDER}/${n}`),
+  ];
+}
+
 export async function getHorses(): Promise<Horse[]> {
-  const [horses, barnDocs, sharedDocs] = await Promise.all([
+  const [rows, folders, barnDocs, sharedDocs] = await Promise.all([
     readList(),
+    horseFolders(),
     // One farrier visit does the whole barn and produces one invoice, so
     // whole-barn paperwork is filed once here rather than copied 22 times.
     readFolder(BARN_FOLDER).then((f) => f.docs),
@@ -368,6 +392,45 @@ export async function getHorses(): Promise<Horse[]> {
       SHARED_FOLDERS.map((f) => readTree(`${pmlRoot()}/${f}`))
     ).then((r) => r.flat()),
   ]);
+
+  /**
+   * The roster comes from the folders, not from the list.
+   *
+   * A folder is a horse and its name is her name, which is the convention
+   * the office already files by. The list supplies what a folder cannot —
+   * price, status, care dates, notes — attached by name so that renaming a
+   * folder renames the horse instead of orphaning her record. A folder with
+   * no record still shows: that is how a new horse arrives.
+   */
+  const claimed = new Set<Horse>();
+  const horses: Horse[] = folders.map((folder) => {
+    const p = parseFolder(folder);
+    const row = matchRow(folder, p, rows, claimed);
+    if (row) claimed.add(row);
+
+    const base: Horse = row
+      ? { ...row }
+      : {
+          ...EMPTY_HORSE,
+          id: `folder:${folder}`,
+          status: folder.startsWith(`${SOLD_FOLDER}/`) ? "off" : "wip",
+        };
+
+    return {
+      ...base,
+      // The folder wins on identity. That is the whole point.
+      reg: p.reg ?? base.reg,
+      barn: p.barn ?? base.barn,
+      pending: p.pending || (!p.reg && !p.barn && base.pending),
+      idline: p.idline ?? base.idline,
+      folderName: folder,
+      status: folder.startsWith(`${SOLD_FOLDER}/`) ? "off" : base.status,
+    };
+  });
+
+  // Records with no folder of their own — embryos, a recip mare — still
+  // belong on the list. They are horses, they just have no paperwork yet.
+  horses.push(...rows.filter((r) => !claimed.has(r)).map((r) => ({ ...r, folderName: null })));
 
   // A shared document belongs to whichever horses its filename mentions.
   // One that names nobody belongs to nobody — unlike barn paperwork, a
@@ -448,6 +511,34 @@ export async function getHorses(): Promise<Horse[]> {
   );
 }
 
+/**
+ * The list item id to write to.
+ *
+ * A horse found as a folder has no record yet — that is normal, it is how
+ * a new horse arrives. The first time anyone writes to her, give her one,
+ * pointed at her folder. Nobody has to create a record by hand.
+ */
+async function resolveItemId(id: string): Promise<string> {
+  if (!id.startsWith("folder:")) return id;
+  const folder = id.slice("folder:".length);
+  const { site, list } = await resolveIds();
+
+  const existing = await graphAll<any>(
+    `/sites/${site}/lists/${list}/items?expand=fields&$top=200`
+  );
+  const hit = existing.find(
+    (it) =>
+      String(it.fields?.FolderName ?? "").toLowerCase() === folder.toLowerCase()
+  );
+  if (hit) return String(hit.id);
+
+  const made: any = await graph(`/sites/${site}/lists/${list}/items`, {
+    method: "POST",
+    body: JSON.stringify({ fields: { FolderName: folder, Sort: 900 } }),
+  });
+  return String(made.id);
+}
+
 const CARE_COLUMN: Record<CareKey, string> = {
   farrier: "Farrier",
   worm: "Deworm",
@@ -471,8 +562,9 @@ export async function saveCareDate(
     throw new Error("BAD_DATE");
   }
 
+  const row = await resolveItemId(itemId);
   const { site, list } = await resolveIds();
-  await graph(`/sites/${site}/lists/${list}/items/${itemId}/fields`, {
+  await graph(`/sites/${site}/lists/${list}/items/${row}/fields`, {
     method: "PATCH",
     body: JSON.stringify({ [column]: date }),
   });
@@ -500,8 +592,9 @@ export async function saveLines(itemId: string, key: TextKey, lines: string[]) {
     .slice(0, 40);
   if (clean.some((l) => l.length > 600)) throw new Error("TOO_LONG");
 
+  const row = await resolveItemId(itemId);
   const { site, list } = await resolveIds();
-  await graph(`/sites/${site}/lists/${list}/items/${itemId}/fields`, {
+  await graph(`/sites/${site}/lists/${list}/items/${row}/fields`, {
     method: "PATCH",
     body: JSON.stringify({ [column]: clean.join("\n") }),
   });
@@ -558,8 +651,9 @@ export async function saveRecord(
   // A horse with a registered name is no longer awaiting one.
   if ("reg" in patch) fields.NamePending = !patch.reg;
 
+  const row = await resolveItemId(itemId);
   const { site, list } = await resolveIds();
-  await graph(`/sites/${site}/lists/${list}/items/${itemId}/fields`, {
+  await graph(`/sites/${site}/lists/${list}/items/${row}/fields`, {
     method: "PATCH",
     body: JSON.stringify(fields),
   });

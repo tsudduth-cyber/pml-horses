@@ -123,6 +123,34 @@ function nearest<T extends { at: number }>(
 }
 
 /**
+ * The nearest entry on either side of `at`, within `window` characters.
+ *
+ * Which side the horse's name falls on depends on how the invoice is laid
+ * out. "Sully | Oct 13 | Coggins" puts it before the service; the farrier's
+ * "10/26/2026 Trim lizard" puts it after. Looking only backwards credited
+ * every line on that second kind to the horse on the line above, so the
+ * whole barn came out shifted by one. Ties go to the earlier one, which is
+ * the way a row usually reads.
+ */
+function nearestEither<T extends { at: number }>(
+  list: T[],
+  at: number,
+  window: number
+): T | null {
+  let best: T | null = null;
+  let gap = Infinity;
+  for (const e of list) {
+    const d = Math.abs(e.at - at);
+    if (d > window) continue;
+    if (d < gap) {
+      gap = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+/**
  * Pull care events out of a document's text.
  *
  * A vet invoice is a table — patient, date, item — flattened into one run of
@@ -142,7 +170,7 @@ export function eventsIn(
     const re = new RegExp(t.match.source, "gi");
     for (const m of text.matchAll(re)) {
       const d = nearest(dates, m.index!, 160);
-      const h = nearest(named, m.index!, 160);
+      const h = nearestEither(named, m.index!, 160);
       if (!d || !h) continue;
       out.push({
         id: h.id,

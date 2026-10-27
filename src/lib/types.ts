@@ -87,7 +87,9 @@ export const CARE_TASKS: {
     label: "Farrier",
     every: "every 6–8 weeks",
     days: 49,
-    match: /\b(farrier|shoe\w*|trim\w*|reset)\b/i,
+    // Half sets, full sets and pads are shoeing too — the farrier's own
+    // invoice wording, which is what these have to match.
+    match: /\b(farrier|shoe\w*|trim\w*|reset|half\s?set|full\s?set|pads?|clips?)\b/i,
   },
   {
     key: "worm",

@@ -476,9 +476,22 @@ export async function getHorses(): Promise<Horse[]> {
   // A shared document belongs to whichever horses its filename mentions.
   // One that names nobody belongs to nobody — unlike barn paperwork, a
   // credit card statement is not everyone's.
-  const shared = sharedDocs
-    .map((d) => ({ doc: d, only: namedHorses(d.name, horses) }))
-    .filter((e) => e.only);
+  const sharedAll = sharedDocs.map((d) => ({
+    doc: d,
+    only: namedHorses(d.name, horses),
+  }));
+  const shared = sharedAll.filter((e) => e.only);
+  /**
+   * Shared paperwork whose filename names nobody — "Invoice 1038.pdf".
+   *
+   * It belongs on no horse's page, so it used to be dropped outright. But
+   * that is what most farrier and vet invoices look like: a generic number
+   * on the outside and the horses listed inside. Dropping them meant the
+   * dates they carry were never read. They go to the scanner instead, with
+   * no horse attached, which is the same way whole-barn paperwork is read —
+   * whoever the document names inside is who it is about.
+   */
+  const unnamedShared = sharedAll.filter((e) => !e.only).map((e) => e.doc);
 
   // Work out who each barn document is about once, not once per horse.
   const barn = careEntries(barnDocs).map((e) => ({
@@ -525,6 +538,7 @@ export async function getHorses(): Promise<Horse[]> {
     // Barn paperwork is not on any one horse's page, so it would otherwise
     // never be read. No ids means "whoever the document names inside".
     ...barnDocs.filter((d) => !d.folder).map((doc) => ({ doc, ids: [] as string[] })),
+    ...unnamedShared.filter((d) => !d.folder).map((doc) => ({ doc, ids: [] as string[] })),
   ];
 
   // Care dates read out of the documents themselves beat ones guessed from a

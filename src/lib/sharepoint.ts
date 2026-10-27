@@ -12,15 +12,42 @@ const ROOT = process.env.SP_HORSES_PATH!;
 const BARN_FOLDER = process.env.SP_BARN_FOLDER ?? "_Barn";
 const SOLD_FOLDER = process.env.SP_SOLD_FOLDER ?? "x_Sold Horses";
 /**
- * Folders outside /Horses/ that still hold horse paperwork. Payables is
- * filed by month for the books and AQHA by subject — correct for the people
- * who keep them, and not something to reorganise for an app. The app reads
- * them instead and hangs each file on the horse its name mentions.
+ * Folders outside /Horses/ that still hold horse paperwork.
+ *
+ * This was a hardcoded list — Payables and AQHA — and it was wrong twice.
+ * Payables was missed first, then "Farrier Expenses", which had six farrier
+ * invoices in it that the app had never read. The office files where the
+ * office files, and naming the places in code means being wrong again the
+ * next time somebody makes a folder.
+ *
+ * So the app looks instead: every folder beside /Horses/ is fair game. A
+ * document only does anything if its name carries a care word, a date and
+ * a horse's name, so sweeping wider costs noise, not accuracy. Setting
+ * SP_SHARED_FOLDERS pins the list back down if that ever stops being true.
  */
-const SHARED_FOLDERS = (process.env.SP_SHARED_FOLDERS ?? "Payables,AQHA")
+const SHARED_OVERRIDE = (process.env.SP_SHARED_FOLDERS ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+
+async function sharedFolders(): Promise<string[]> {
+  if (SHARED_OVERRIDE.length) return SHARED_OVERRIDE;
+  const horses = ROOT.split("/").pop()!;
+  try {
+    const enc = encodeURIComponent(pmlRoot()).replace(/%2F/g, "/");
+    const res: any = await graph(
+      `/drives/${DRIVE}/root:/${enc}:/children?$top=200`
+    );
+    return (res.value ?? [])
+      .filter(
+        (c: any) =>
+          c.folder && c.name !== horses && !/^[._]/.test(String(c.name))
+      )
+      .map((c: any) => c.name as string);
+  } catch {
+    return ["Payables", "AQHA"];
+  }
+}
 /** The PML folder that /Horses/ sits inside. Resolved per call, not at
  *  module load — the environment is not there when the build evaluates
  *  this file. */
@@ -305,7 +332,11 @@ interface CareEntry {
   base: string;
 }
 
+/** Paperwork about work that hasn't happened. Not proof of anything. */
+const NOT_DONE = /\b(quote|quotes|estimate|estimates|proposal|bid|schedule|scheduled|reminder|due|upcoming|draft)\b/i;
+
 export function careEntries(docs: Doc[]): CareEntry[] {
+  const today = new Date().toISOString().slice(0, 10);
   const out: CareEntry[] = [];
   for (const d of docs) {
     if (d.folder) continue;
@@ -313,8 +344,12 @@ export function careEntries(docs: Doc[]): CareEntry[] {
     // a photo of a horse, not a vaccination record.
     if (/\.(jpe?g|png|heic|webp|gif|mov|mp4)$/i.test(d.name)) continue;
     const base = d.name.replace(/\.[a-z0-9]+$/i, "");
+    if (NOT_DONE.test(base)) continue;
     const date = dateInName(base);
     if (!date) continue;
+    // A date still to come is something booked, not something done. Reading
+    // it as "last done" would tell Philip a horse is current when she isn't.
+    if (date > today) continue;
     for (const t of CARE_TASKS) {
       if (t.match.test(base)) out.push({ key: t.key, date, from: d.name, base });
     }
@@ -388,9 +423,11 @@ export async function getHorses(): Promise<Horse[]> {
     // One farrier visit does the whole barn and produces one invoice, so
     // whole-barn paperwork is filed once here rather than copied 22 times.
     readFolder(BARN_FOLDER).then((f) => f.docs),
-    Promise.all(
-      SHARED_FOLDERS.map((f) => readTree(`${pmlRoot()}/${f}`))
-    ).then((r) => r.flat()),
+    sharedFolders().then((names) =>
+      Promise.all(names.map((f) => readTree(`${pmlRoot()}/${f}`))).then((r) =>
+        r.flat()
+      )
+    ),
   ]);
 
   /**

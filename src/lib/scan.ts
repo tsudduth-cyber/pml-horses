@@ -26,8 +26,10 @@ export interface ScanHit {
  *    side of the service word, count half sets and pads as farrier work.
  * 3: also read what each line cost, so a horse carries her own spend.
  * 4: read signed breeding contracts for money committed but not billed.
+ * 5: only read charges from documents that say they are bills, so a
+ *    balance sheet's carrying values stop reading as care costs.
  */
-export const SCAN_VERSION = 4;
+export const SCAN_VERSION = 5;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -220,6 +222,25 @@ const MONEY = /(?<![\d.])\$\s?\d[\d,]*(?:\.\d{2})?(?![\d.])|(?<![\d.])\d[\d,]*\.
 const SUMMARY_LINE =
   /\b(total|subtotal|balance|amount due|payment|paid|tax|deposit|credit|due|invoice amount)\b/i;
 
+/**
+ * A document has to say it is a bill before a number in it is treated as
+ * a charge.
+ *
+ * This is an allow-list on purpose. A balance sheet lists every horse
+ * beside her carrying value — "Vintage Enterprize (JP) 30,000.00" — which
+ * reads exactly like an invoice row and is not a cost at all; three of
+ * them on file would have put $90,000 of "care" on JP. Missing a real
+ * invoice shows up as a horse with no charges, which is visible. Reading
+ * a balance sheet as charges shows up as a plausible wrong number, which
+ * is not.
+ */
+const LOOKS_LIKE_A_BILL =
+  /\b(invoice|receipt|bill to|billed to|amount due|balance due|remit|statement of account)\b/i;
+
+/** Documents that list money but bill nothing. */
+const NOT_A_BILL =
+  /\b(balance sheet|income statement|profit (and|&) loss|p&l|general ledger|trial balance|settlement sheet|agreement|contract|certificate|registration|transfer form)\b/i;
+
 function toAmount(s: string): number {
   const n = Number(s.replace(/[$,\s]/g, ""));
   return Number.isFinite(n) ? n : 0;
@@ -290,14 +311,21 @@ export function documentSpend(
   };
 
   const base = name.replace(/\.[a-z0-9]+$/i, "");
+  const head = text.slice(0, 1200);
+  if (NOT_A_BILL.test(base) || NOT_A_BILL.test(head)) return out;
+
   const onCover = horsesIn(base, horses);
   const coverIds = [...new Set(onCover.map((h) => h.id))];
   const coverAmounts = moneyIn(base);
 
+  // The office's own filing — one horse and a total on the cover — is
+  // itself the statement that this is her bill for that amount.
   if (coverIds.length === 1 && coverAmounts.length) {
     push(coverIds[0], coverAmounts[coverAmounts.length - 1], base);
     return out;
   }
+
+  if (!LOOKS_LIKE_A_BILL.test(base) && !LOOKS_LIKE_A_BILL.test(head)) return out;
 
   const rows = costsIn(text, horses);
   if (!rows.length) return out;
@@ -344,12 +372,23 @@ export function contractCommitment(
   text: string,
   horses: Horse[]
 ): { id: string; amount: number; label: string } | null {
-  const stallion = text.match(/\bStallion:\s+([^\n]{2,50}?)\s{2,}/)?.[1]?.trim();
-  if (!stallion || stallion.length < 3) return null;
-
-  const mare = horses.find(
-    (h) => h.breeding && h.breeding.toLowerCase().includes(stallion.toLowerCase())
-  );
+  // Matched from the mare's side rather than the contract's. Pulling the
+  // stallion out of the contract means depending on how that vendor lays
+  // its header out; every mare being bred already names her stallion in
+  // her own breeding line, and the contract either mentions him or does
+  // not. One less format to be wrong about.
+  const hay = text.toLowerCase();
+  let mare: Horse | undefined;
+  let stallion = "";
+  for (const h of horses) {
+    const named = h.breeding?.match(/\bbred to\s+(.+?)(?:\s*\(|\s+at\s+|[,.]|$)/i)?.[1]?.trim();
+    if (!named || named.length < 3) continue;
+    if (hay.includes(named.toLowerCase())) {
+      mare = h;
+      stallion = named;
+      break;
+    }
+  }
   if (!mare) return null;
 
   const head = text.split(ALTERNATIVES)[0];

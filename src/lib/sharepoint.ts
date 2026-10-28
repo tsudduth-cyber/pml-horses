@@ -572,9 +572,20 @@ export async function getHorses(): Promise<Horse[]> {
 
       const charges = pick(scan.spend);
       if (charges) {
-        h.charges = [...charges].sort((a, b) =>
-          (b.date ?? "").localeCompare(a.date ?? "")
-        );
+        // The same bill reaches the app under two names — the farrier's
+        // "Invoice 1038.pdf" in Farrier Expenses and the office's renamed
+        // copy in Payables are one visit, and charging her twice for one
+        // trim is worse than not seeing it. Two charges on the same date
+        // for the same amount off the same line are the same charge.
+        const seen = new Set<string>();
+        h.charges = [...charges]
+          .filter((c) => {
+            const key = `${c.date}|${c.amount}|${c.line.trim().toLowerCase()}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
       }
       const owed = pick(scan.committed);
       if (owed) h.committed = [...owed];

@@ -23,10 +23,10 @@ export async function POST(req: Request) {
     const force = new URL(req.url).searchParams.get("force") === "1";
 
     const horses = await getHorses();
-    const { stale, docs } = scanState();
+    const { stale, docs, contracts } = scanState();
     if (!stale && !force) return Response.json({ ok: true, skipped: "fresh" });
 
-    const scan = await runScan(horses, docs);
+    const scan = await runScan(horses, docs, contracts);
     const found = Object.values(scan.items).reduce(
       (n, h) => n + Object.keys(h).length,
       0

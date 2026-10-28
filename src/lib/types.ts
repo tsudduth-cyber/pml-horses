@@ -72,6 +72,8 @@ export interface Horse {
    * keep and is honest about what was actually billed to her.
    */
   charges: Charge[];
+  /** Money committed in a signed contract but not yet billed. */
+  committed: Charge[];
   folderName: string | null;
   folderUrl: string | null;
   docs: Doc[];
@@ -150,6 +152,6 @@ export const EMPTY_HORSE: Horse = {
   sex: null, color: null, dob: null, bought: null, boughtNote: null,
   price: null, salePrice: null, soldOn: null, status: "wip", label: null,
   pedigree: null, breeding: null, notes: [], missing: [], care: {},
-  derived: {}, charges: [], folderName: null, folderUrl: null,
+  derived: {}, charges: [], committed: [], folderName: null, folderUrl: null,
   docs: [], photos: [], sort: 900,
 };

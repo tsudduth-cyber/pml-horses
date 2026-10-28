@@ -1,5 +1,5 @@
 import { graph, graphAll } from "./graph";
-import type { Horse, Doc, Status, CareKey, DerivedCare } from "./types";
+import type { Horse, Doc, Status, CareKey, DerivedCare, Charge } from "./types";
 import { CARE_TASKS, EMPTY_HORSE } from "./types";
 import { readScan, scanIsStale } from "./scan";
 import { parseFolder, matchRow } from "./roster";
@@ -11,6 +11,12 @@ const ROOT = process.env.SP_HORSES_PATH!;
 /** Whole-barn paperwork lives here — one farrier invoice covers everyone. */
 const BARN_FOLDER = process.env.SP_BARN_FOLDER ?? "_Barn";
 const SOLD_FOLDER = process.env.SP_SOLD_FOLDER ?? "x_Sold Horses";
+/**
+ * Breeding contracts live here. It is skipped as a horse folder — these
+ * are stallions and prospects, not PML's own stock — but the signed
+ * contracts inside commit real money against mares who are on the roster.
+ */
+const BREEDING_FOLDER = process.env.SP_BREEDING_FOLDER ?? "_Breeding Horses";
 /**
  * Folders outside /Horses/ that still hold horse paperwork.
  *
@@ -56,7 +62,12 @@ const pmlRoot = () => ROOT.replace(/\/[^/]+$/, "");
 /** Set by getHorses so the page can tell the app whether to rescan. */
 let staleScan = false;
 let lastDocIndex: { doc: Doc; ids: string[] }[] = [];
-export const scanState = () => ({ stale: staleScan, docs: lastDocIndex });
+let lastContracts: Doc[] = [];
+export const scanState = () => ({
+  stale: staleScan,
+  docs: lastDocIndex,
+  contracts: lastContracts,
+});
 
 /**
  * Resolve the site and list by name so nobody has to go hunting for GUIDs.
@@ -181,6 +192,7 @@ async function readList(): Promise<Horse[]> {
       care,
       derived: {},
       charges: [],
+      committed: [],
       folderName,
       folderUrl: null,
       docs: [],
@@ -418,12 +430,13 @@ async function horseFolders(): Promise<string[]> {
 }
 
 export async function getHorses(): Promise<Horse[]> {
-  const [rows, folders, barnDocs, sharedDocs] = await Promise.all([
+  const [rows, folders, barnDocs, contractDocs, sharedDocs] = await Promise.all([
     readList(),
     horseFolders(),
     // One farrier visit does the whole barn and produces one invoice, so
     // whole-barn paperwork is filed once here rather than copied 22 times.
     readFolder(BARN_FOLDER).then((f) => f.docs),
+    readTree(`${ROOT}/${BREEDING_FOLDER}`),
     sharedFolders().then((names) =>
       Promise.all(names.map((f) => readTree(`${pmlRoot()}/${f}`))).then((r) =>
         r.flat()
@@ -454,7 +467,7 @@ export async function getHorses(): Promise<Horse[]> {
           // these every folder-driven horse would share one notes array and
           // one care object with all the others.
           notes: [], missing: [], care: {}, derived: {}, charges: [],
-          docs: [], photos: [],
+          committed: [], docs: [], photos: [],
           id: `folder:${folder}`,
           status: folder.startsWith(`${SOLD_FOLDER}/`) ? "off" : "wip",
         };
@@ -532,6 +545,8 @@ export async function getHorses(): Promise<Horse[]> {
     })
   );
 
+  lastContracts = contractDocs;
+
   // What the scanner needs: every document, and whose it is.
   lastDocIndex = [
     ...horses.flatMap((h) =>
@@ -552,14 +567,17 @@ export async function getHorses(): Promise<Horse[]> {
       // first write gives her a record and a numeric id. Without the
       // fallback, that first write silently drops everything the scanner
       // read out of her paperwork until the next rescan.
-      const charges =
-        scan.spend?.[h.id] ??
-        (h.folderName ? scan.spend?.[`folder:${h.folderName}`] : undefined);
+      const pick = (m?: Record<string, Charge[]>) =>
+        m?.[h.id] ?? (h.folderName ? m?.[`folder:${h.folderName}`] : undefined);
+
+      const charges = pick(scan.spend);
       if (charges) {
         h.charges = [...charges].sort((a, b) =>
           (b.date ?? "").localeCompare(a.date ?? "")
         );
       }
+      const owed = pick(scan.committed);
+      if (owed) h.committed = [...owed];
 
       const hits =
         scan.items[h.id] ??

@@ -749,6 +749,19 @@ function Detail({
         </section>
       )}
 
+      {showMoney && h.committed.length > 0 && (
+        <section className="sec">
+          <h3>COMMITTED, NOT YET BILLED</h3>
+          {h.committed.map((c, i) => (
+            <div className="chg" key={`${c.from}-${i}`}>
+              <span className="chg-d">{c.date ? fmt(c.date) : "—"}</span>
+              <span className="chg-f">{c.line}</span>
+              <span className="chg-a">{money(c.amount)}</span>
+            </div>
+          ))}
+        </section>
+      )}
+
       <section className="sec notes">
         <Lines
           horse={h}

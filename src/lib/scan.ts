@@ -25,8 +25,9 @@ export interface ScanHit {
  * 2: read every folder beside /Horses/, credit a horse named on either
  *    side of the service word, count half sets and pads as farrier work.
  * 3: also read what each line cost, so a horse carries her own spend.
+ * 4: read signed breeding contracts for money committed but not billed.
  */
-export const SCAN_VERSION = 3;
+export const SCAN_VERSION = 4;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -39,6 +40,8 @@ export interface Scan {
   items: Record<string, Partial<Record<CareKey, ScanHit>>>;
   /** horse id → every charge billed to her by name. */
   spend?: Record<string, SpendHit[]>;
+  /** horse id → money committed in a signed contract but not yet billed. */
+  committed?: Record<string, SpendHit[]>;
 }
 
 /* ---------- reading the saved scan ---------- */
@@ -314,6 +317,55 @@ export function documentSpend(
   return out;
 }
 
+/* ---------- reading what has been committed ---------- */
+
+/**
+ * Where a contract stops stating what was bought and starts listing what
+ * could have been bought instead. A stallion contract quotes the fees for
+ * every breeding method it does not cover, and counting those would treble
+ * the commitment.
+ */
+const ALTERNATIVES = /\bAlternative Breeding Methods\b/i;
+
+/** The fees a signed stallion contract actually commits to. */
+const FEE_LINE =
+  /\b(booking|stallion|chute|administration)\s+fee:?\s*\$\s?([\d,]+(?:\.\d{2})?)/gi;
+
+/**
+ * What a signed breeding contract commits, and for which mare.
+ *
+ * A contract is not an invoice: nothing has been billed, but the money is
+ * spoken for, and on a mare being bred it is the largest number attached
+ * to her. The contract names the stallion rather than the mare — Solo
+ * Select's says "Mare: To be designated" — so she is found the other way
+ * round, through the stallion named in her own breeding line.
+ */
+export function contractCommitment(
+  text: string,
+  horses: Horse[]
+): { id: string; amount: number; label: string } | null {
+  const stallion = text.match(/\bStallion:\s+([^\n]{2,50}?)\s{2,}/)?.[1]?.trim();
+  if (!stallion || stallion.length < 3) return null;
+
+  const mare = horses.find(
+    (h) => h.breeding && h.breeding.toLowerCase().includes(stallion.toLowerCase())
+  );
+  if (!mare) return null;
+
+  const head = text.split(ALTERNATIVES)[0];
+  const fees = new Map<string, number>();
+  for (const m of head.matchAll(FEE_LINE)) {
+    const kind = m[1].toLowerCase();
+    // First statement of each fee wins; contracts restate them in prose.
+    if (!fees.has(kind)) fees.set(kind, toAmount(m[2]));
+  }
+  const amount = [...fees.values()].reduce((n, v) => n + v, 0);
+  if (!amount) return null;
+
+  const parts = [...fees.entries()].map(([k, v]) => `${k} $${v.toLocaleString()}`);
+  return { id: mare.id, amount, label: `${stallion} — ${parts.join(", ")}` };
+}
+
 /* ---------- the scan itself ---------- */
 
 async function pdfText(itemId: string): Promise<string> {
@@ -334,7 +386,8 @@ async function pdfText(itemId: string): Promise<string> {
  */
 export async function runScan(
   horses: Horse[],
-  docs: { doc: Doc; ids: string[] }[]
+  docs: { doc: Doc; ids: string[] }[],
+  contracts: Doc[] = []
 ): Promise<Scan> {
   const items: Scan["items"] = {};
   const spend: Scan["spend"] = {};
@@ -394,11 +447,38 @@ export async function runScan(
     })
   );
 
+  // Signed contracts, read separately. They are full of prices that are
+  // not charges — shipping rates, late fees, the methods not purchased —
+  // so they never go through the invoice reader.
+  const committed: Scan["committed"] = {};
+  await Promise.all(
+    contracts
+      .filter((d) => !d.folder && /\.pdf$/i.test(d.name) && d.id)
+      .slice(0, 40)
+      .map(async (d) => {
+        let text = "";
+        try {
+          text = await pdfText(d.id);
+        } catch {
+          return;
+        }
+        const c = contractCommitment(text, horses);
+        if (!c) return;
+        (committed[c.id] ??= []).push({
+          date: datesIn(d.name)[0]?.date ?? null,
+          from: d.name,
+          amount: c.amount,
+          line: c.label,
+        });
+      })
+  );
+
   const scan: Scan = {
     at: new Date().toISOString(),
     v: SCAN_VERSION,
     items,
     spend,
+    committed,
   };
   try {
     await writeScan(scan);

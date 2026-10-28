@@ -1,6 +1,6 @@
 import { graph, graphRaw } from "./graph";
 import { CARE_TASKS } from "./types";
-import type { CareKey, Doc, Horse } from "./types";
+import type { CareKey, Charge, Doc, Horse } from "./types";
 
 const DRIVE = process.env.SP_DRIVE_ID!;
 const ROOT = process.env.SP_HORSES_PATH!;
@@ -24,8 +24,12 @@ export interface ScanHit {
  *
  * 2: read every folder beside /Horses/, credit a horse named on either
  *    side of the service word, count half sets and pads as farrier work.
+ * 3: also read what each line cost, so a horse carries her own spend.
  */
-export const SCAN_VERSION = 2;
+export const SCAN_VERSION = 3;
+
+/** One charge read off an invoice, attributed to one horse. */
+export type SpendHit = Charge;
 
 export interface Scan {
   at: string;
@@ -33,6 +37,8 @@ export interface Scan {
   v?: number;
   /** horse id → care key → what the paperwork says. */
   items: Record<string, Partial<Record<CareKey, ScanHit>>>;
+  /** horse id → every charge billed to her by name. */
+  spend?: Record<string, SpendHit[]>;
 }
 
 /* ---------- reading the saved scan ---------- */
@@ -197,6 +203,117 @@ export function eventsIn(
   return out;
 }
 
+/* ---------- reading what a document costs ---------- */
+
+/**
+ * A money amount: either it carries cents, or it carries a dollar sign.
+ *
+ * The lookarounds keep "10.26.2026" in a filename from reading as $10.26,
+ * and a bare quantity column from reading as money.
+ */
+const MONEY = /(?<![\d.])\$\s?\d[\d,]*(?:\.\d{2})?(?![\d.])|(?<![\d.])\d[\d,]*\.\d{2}(?![\d.])/g;
+
+/** A line that restates money already counted somewhere else. */
+const SUMMARY_LINE =
+  /\b(total|subtotal|balance|amount due|payment|paid|tax|deposit|credit|due|invoice amount)\b/i;
+
+function toAmount(s: string): number {
+  const n = Number(s.replace(/[$,\s]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Every money amount in a string, in order. */
+function moneyIn(s: string): number[] {
+  return (s.match(MONEY) ?? []).map(toAmount).filter((n) => n > 0);
+}
+
+/**
+ * What each horse was charged on one document.
+ *
+ * Worked line by line rather than by proximity, because an invoice is a
+ * table and a row is the unit that means something — charging one horse
+ * for the row above her is exactly the mistake to avoid. Summary lines are
+ * skipped so a total is never counted on top of the rows that make it up,
+ * and only the last amount on a row is taken, because a row that reads
+ * "1 75.00 75.00" is a quantity, a rate and the actual charge.
+ */
+export function costsIn(
+  text: string,
+  horses: Horse[]
+): { id: string; amount: number; line: string }[] {
+  const out: { id: string; amount: number; line: string }[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || SUMMARY_LINE.test(line)) continue;
+
+    const amounts = moneyIn(line);
+    if (!amounts.length) continue;
+
+    // One horse named twice on a row is still one horse; two different
+    // horses on a row is a split we have no basis to make.
+    const named = [...new Set(horsesIn(line, horses).map((h) => h.id))];
+    if (named.length !== 1) continue;
+
+    out.push({
+      id: named[0],
+      amount: amounts[amounts.length - 1],
+      line: line.slice(0, 120),
+    });
+  }
+  return out;
+}
+
+/**
+ * What one document says each horse cost.
+ *
+ * A bill for a single horse usually says so on the outside — the office
+ * files it as "Crown Three Vet_10.13.2026_6342_$785.50_Sully Vet.pdf" —
+ * and that total is more reliable than anything picked out of the table
+ * inside, where a line item may not repeat her name. So when the filename
+ * names exactly one horse and carries an amount, that wins outright.
+ *
+ * Otherwise the document is read as a table, which is the whole-barn case:
+ * one farrier visit, twenty rows, a different charge against each name.
+ */
+export function documentSpend(
+  name: string,
+  text: string,
+  horses: Horse[],
+  date: string | null
+): Record<string, SpendHit[]> {
+  const out: Record<string, SpendHit[]> = {};
+  const push = (id: string, amount: number, line: string) => {
+    (out[id] ??= []).push({ date, from: name, amount, line });
+  };
+
+  const base = name.replace(/\.[a-z0-9]+$/i, "");
+  const onCover = horsesIn(base, horses);
+  const coverIds = [...new Set(onCover.map((h) => h.id))];
+  const coverAmounts = moneyIn(base);
+
+  if (coverIds.length === 1 && coverAmounts.length) {
+    push(coverIds[0], coverAmounts[coverAmounts.length - 1], base);
+    return out;
+  }
+
+  const rows = costsIn(text, horses);
+  if (!rows.length) return out;
+
+  // If the cover states a total, the rows have to add up to roughly it.
+  // When they do not, the table was misread and a wrong number on Philip's
+  // phone is worse than no number.
+  const stated = coverAmounts.length
+    ? coverAmounts[coverAmounts.length - 1]
+    : null;
+  const summed = rows.reduce((n, r) => n + r.amount, 0);
+  if (stated !== null && Math.abs(summed - stated) > Math.max(1, stated * 0.02)) {
+    return {};
+  }
+
+  for (const r of rows) push(r.id, r.amount, r.line);
+  return out;
+}
+
 /* ---------- the scan itself ---------- */
 
 async function pdfText(itemId: string): Promise<string> {
@@ -220,9 +337,15 @@ export async function runScan(
   docs: { doc: Doc; ids: string[] }[]
 ): Promise<Scan> {
   const items: Scan["items"] = {};
+  const spend: Scan["spend"] = {};
 
+  const seen = new Set<string>();
   const pdfs = docs
     .filter((d) => !d.doc.folder && /\.pdf$/i.test(d.doc.name) && d.doc.id)
+    // The same invoice can reach here twice — once through a horse's folder
+    // and once through Payables. Counting it twice would overstate what she
+    // cost, so each file is read once.
+    .filter((d) => !seen.has(d.doc.id) && seen.add(d.doc.id))
     .sort((a, b) => (b.doc.modified ?? "").localeCompare(a.doc.modified ?? ""))
     .slice(0, 120); // newest first, bounded so one bad folder cannot hang it
 
@@ -254,10 +377,29 @@ export async function runScan(
 
       // Nothing named a horse, but the folder did — still useful.
       if (!found.length && scoped.length === 1) return;
+
+      // What it cost. The invoice date is whatever the care lines agreed on,
+      // falling back to a date in the filename.
+      const on = found[0]?.date ?? datesIn(entry.doc.name)[0]?.date ?? null;
+      const billed = documentSpend(
+        entry.doc.name,
+        text,
+        scoped.length ? scoped : horses,
+        on
+      );
+      for (const [id, hits] of Object.entries(billed)) {
+        if (entry.ids.length && !entry.ids.includes(id)) continue;
+        (spend[id] ??= []).push(...hits);
+      }
     })
   );
 
-  const scan: Scan = { at: new Date().toISOString(), v: SCAN_VERSION, items };
+  const scan: Scan = {
+    at: new Date().toISOString(),
+    v: SCAN_VERSION,
+    items,
+    spend,
+  };
   try {
     await writeScan(scan);
   } catch {

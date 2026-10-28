@@ -608,6 +608,7 @@ function Detail({
     ["Bought", boughtText(h), "Missing"]
   );
   if (h.status === "off") rows.push(["Sold", fmt(h.soldOn), "Missing"]);
+  const spent = h.charges.reduce((n, c) => n + c.amount, 0);
   if (showMoney) {
     rows.push([
       "Purchase price",
@@ -620,6 +621,9 @@ function Detail({
         h.salePrice != null ? money(h.salePrice) : null,
         "Missing",
       ]);
+    if (spent > 0) rows.push(["Care billed", money(spent), "—"]);
+    if (h.price != null && spent > 0)
+      rows.push(["In her to date", money(h.price + spent), "—"]);
   }
 
   const hero = h.photos[shot];
@@ -720,6 +724,28 @@ function Detail({
               onSave={onSave}
             />
           ))}
+        </section>
+      )}
+
+      {showMoney && h.charges.length > 0 && (
+        <section className="sec">
+          <h3>WHAT SHE&apos;S COST</h3>
+          {h.charges.map((c, i) => (
+            <div className="chg" key={`${c.from}-${i}`}>
+              <span className="chg-d">{c.date ? fmt(c.date) : "—"}</span>
+              <span className="chg-f">{c.from}</span>
+              <span className="chg-a">{money(c.amount)}</span>
+            </div>
+          ))}
+          <div className="chg chg-sum">
+            <span className="chg-d" />
+            <span className="chg-f">Billed to her by name</span>
+            <span className="chg-a">{money(spent)}</span>
+          </div>
+          <p className="chg-note">
+            Hay, bedding and the rest of the barn don&apos;t name a horse, so
+            they&apos;re not in here.
+          </p>
         </section>
       )}
 

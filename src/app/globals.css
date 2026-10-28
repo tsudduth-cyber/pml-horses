@@ -322,5 +322,12 @@ a.btn{text-decoration:none;text-align:center;display:block}
 .recedit .rf input,.recedit .rf select{flex:1;min-width:0;font:inherit;font-size:14px;font-family:var(--sans);
   padding:7px 8px;border:1px solid var(--rule);background:var(--paper);color:var(--ink);border-radius:1px}
 .recedit .rf input:focus,.recedit .rf select:focus{outline:2px solid var(--leather);outline-offset:-1px}
+.chg{display:flex;align-items:baseline;gap:10px;padding:7px 0;border-bottom:1px solid var(--paper-2);font-size:13.5px}
+.chg-d{flex:0 0 68px;color:var(--soft);font-variant-numeric:tabular-nums}
+.chg-f{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chg-a{flex:0 0 auto;font-variant-numeric:tabular-nums}
+.chg-sum{border-bottom:none;font-weight:600}
+.chg-sum .chg-f{color:var(--soft);font-weight:400}
+.chg-note{margin:6px 0 0;font-size:12.5px;line-height:1.45;color:var(--soft)}
 .recedit .rmerge{margin:12px 0 0;font-size:13px;line-height:1.45;color:var(--leather)}
 .recedit .lacts{margin-top:14px}

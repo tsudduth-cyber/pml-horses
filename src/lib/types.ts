@@ -17,6 +17,17 @@ export interface DerivedCare {
   barn: boolean;
 }
 
+/** One charge read off an invoice and attributed to one horse. */
+export interface Charge {
+  /** The invoice date, where the document carries one. */
+  date: string | null;
+  /** The file it was read out of. */
+  from: string;
+  amount: number;
+  /** The line it came from, so a wrong number is traceable. */
+  line: string;
+}
+
 export interface Doc {
   /** Drive item id. Photos are fetched through /api/photo by this. */
   id: string;
@@ -54,6 +65,13 @@ export interface Horse {
   care: Partial<Record<CareKey, string>>;
   /** Read off filed paperwork. Used only where `care` has nothing. */
   derived: Partial<Record<CareKey, DerivedCare>>;
+  /**
+   * Every charge billed to this horse by name. Direct costs only — hay,
+   * bedding and the rest of the barn's overhead name nobody and are not
+   * split across the roster, so this understates what she really costs to
+   * keep and is honest about what was actually billed to her.
+   */
+  charges: Charge[];
   folderName: string | null;
   folderUrl: string | null;
   docs: Doc[];
@@ -132,6 +150,6 @@ export const EMPTY_HORSE: Horse = {
   sex: null, color: null, dob: null, bought: null, boughtNote: null,
   price: null, salePrice: null, soldOn: null, status: "wip", label: null,
   pedigree: null, breeding: null, notes: [], missing: [], care: {},
-  derived: {}, folderName: null, folderUrl: null, docs: [], photos: [],
-  sort: 900,
+  derived: {}, charges: [], folderName: null, folderUrl: null,
+  docs: [], photos: [], sort: 900,
 };

@@ -3,6 +3,7 @@ import type { Horse, Doc, Status, CareKey, DerivedCare, Charge } from "./types";
 import { CARE_TASKS, EMPTY_HORSE } from "./types";
 import { readScan, scanIsStale } from "./scan";
 import { parseFolder, matchRow } from "./roster";
+import { readAliases, rememberNames } from "./aliases";
 
 const HOST = process.env.SP_HOSTNAME!;
 const DRIVE = process.env.SP_DRIVE_ID!;
@@ -193,6 +194,7 @@ async function readList(): Promise<Horse[]> {
       derived: {},
       charges: [],
       committed: [],
+      aka: [],
       folderName,
       folderUrl: null,
       docs: [],
@@ -380,9 +382,19 @@ const rxEscape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * whole barn, which is the farrier case. Returns null for "everyone".
  */
 export function namedHorses(base: string, horses: Horse[]): Set<string> | null {
+  // A former name only counts while no other horse answers to it now.
+  // Reusing a barn name is normal over years, and crediting the wrong
+  // horse is worse than losing an old document.
+  const current = new Set<string>();
+  for (const h of horses) {
+    for (const n of [h.barn, h.reg]) if (n) current.add(n.toLowerCase());
+  }
+
   const hit = new Set<string>();
   for (const h of horses) {
-    for (const name of [h.barn, h.reg]) {
+    const mine = new Set([h.barn, h.reg].filter(Boolean).map((n) => n!.toLowerCase()));
+    const past = h.aka.filter((n) => !current.has(n.toLowerCase()) || mine.has(n.toLowerCase()));
+    for (const name of [h.barn, h.reg, ...past]) {
       // Two characters is enough — JP is a real barn name here, and missing
       // it would spread his invoice across the whole place.
       if (!name || name.length < 2) continue;
@@ -430,7 +442,7 @@ async function horseFolders(): Promise<string[]> {
 }
 
 export async function getHorses(): Promise<Horse[]> {
-  const [rows, folders, barnDocs, contractDocs, sharedDocs] = await Promise.all([
+  const [rows, folders, barnDocs, contractDocs, sharedDocs, aka] = await Promise.all([
     readList(),
     horseFolders(),
     // One farrier visit does the whole barn and produces one invoice, so
@@ -442,6 +454,7 @@ export async function getHorses(): Promise<Horse[]> {
         r.flat()
       )
     ),
+    readAliases(),
   ]);
 
   /**
@@ -467,7 +480,7 @@ export async function getHorses(): Promise<Horse[]> {
           // these every folder-driven horse would share one notes array and
           // one care object with all the others.
           notes: [], missing: [], care: {}, derived: {}, charges: [],
-          committed: [], docs: [], photos: [],
+          committed: [], aka: [], docs: [], photos: [],
           id: `folder:${folder}`,
           status: folder.startsWith(`${SOLD_FOLDER}/`) ? "off" : "wip",
         };
@@ -487,6 +500,11 @@ export async function getHorses(): Promise<Horse[]> {
   // Records with no folder of their own — embryos, a recip mare — still
   // belong on the list. They are horses, they just have no paperwork yet.
   horses.push(...rows.filter((r) => !claimed.has(r)).map((r) => ({ ...r, folderName: null })));
+
+  // Former names, so paperwork filed before a rename still finds her.
+  // Attached before anything is matched, because every match below —
+  // barn documents, shared invoices, the scan — reads these.
+  for (const h of horses) h.aka = aka[h.id] ?? [];
 
   // A shared document belongs to whichever horses its filename mentions.
   // One that names nobody belongs to nobody — unlike barn paperwork, a
@@ -761,6 +779,12 @@ export async function saveRecord(
   // nobody wants to lose — so its content moves over before it goes.
   const moveTo =
     typeof patch.folderName === "string" ? patch.folderName.trim() : "";
+
+  const before = await graph<any>(
+    `/sites/${site}/lists/${list}/items/${row}?expand=fields`
+  ).catch(() => null);
+  const was = (col: string) => String(before?.fields?.[col] ?? "").trim();
+
   if (moveTo) {
     const held = await rowHoldingFolder(moveTo, row);
     if (held) {
@@ -773,12 +797,8 @@ export async function saveRecord(
     // Recip folder), and keeping it would leave her listed under the wrong
     // name after the very save meant to fix that. A nickname the folder
     // does carry stays.
-    if (!("barn" in patch)) {
-      const current = await graph<any>(
-        `/sites/${site}/lists/${list}/items/${row}?expand=fields`
-      ).catch(() => null);
-      const was = String(current?.fields?.BarnName ?? "").trim();
-      if (was && !moveTo.toLowerCase().includes(was.toLowerCase())) {
+    if (!("barn" in patch) && was("BarnName")) {
+      if (!moveTo.toLowerCase().includes(was("BarnName").toLowerCase())) {
         fields.BarnName = null;
       }
     }
@@ -788,6 +808,22 @@ export async function saveRecord(
     method: "PATCH",
     body: JSON.stringify(fields),
   });
+
+  // Whatever she stopped being called, she was called it on every document
+  // already filed. Keep the old names so those keep finding her.
+  const retired: (string | null)[] = [];
+  for (const [col, next] of [
+    ["FolderName", moveTo || (fields.FolderName as string | null)],
+    ["BarnName", "BarnName" in fields ? (fields.BarnName as string | null) : undefined],
+    ["Title", "Title" in fields ? (fields.Title as string | null) : undefined],
+  ] as [string, string | null | undefined][]) {
+    if (next === undefined) continue;
+    const old = was(col);
+    if (old && old.toLowerCase() !== String(next ?? "").toLowerCase()) {
+      retired.push(old);
+    }
+  }
+  await rememberNames(row, retired);
 }
 
 /** The list item already pointing at `folder`, if it isn't `exceptId`. */
@@ -871,6 +907,15 @@ async function mergeRows(
       body: JSON.stringify(patch),
     });
   }
+
+  // The record going away took names with it, and those names are on
+  // paperwork that is not going away. "New recip" has to keep finding her
+  // after she becomes Appaloosa Recip.
+  await rememberNames(String(target.id), [
+    src.fields?.BarnName,
+    src.fields?.Title,
+    src.fields?.FolderName,
+  ]);
 
   await graph(`/sites/${site}/lists/${list}/items/${sourceId}`, {
     method: "DELETE",

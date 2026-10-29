@@ -28,8 +28,10 @@ export interface ScanHit {
  * 4: read signed breeding contracts for money committed but not billed.
  * 5: only read charges from documents that say they are bills, so a
  *    balance sheet's carrying values stop reading as care costs.
+ * 6: match a horse's former names, so paperwork filed before a rename
+ *    keeps finding her.
  */
-export const SCAN_VERSION = 5;
+export const SCAN_VERSION = 6;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -122,9 +124,23 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Every mention of a horse by barn or registered name, with where it sits. */
 function horsesIn(text: string, horses: Horse[]): { at: number; id: string }[] {
+  // Former names count too, so an invoice filed before she was renamed
+  // still finds her — unless another horse answers to that name now, in
+  // which case crediting the wrong horse is the worse mistake.
+  const current = new Set<string>();
+  for (const h of horses) {
+    for (const n of [h.barn, h.reg]) if (n) current.add(n.toLowerCase());
+  }
+
   const out: { at: number; id: string }[] = [];
   for (const h of horses) {
-    for (const name of [h.barn, h.reg]) {
+    const mine = new Set(
+      [h.barn, h.reg].filter(Boolean).map((n) => n!.toLowerCase())
+    );
+    const past = (h.aka ?? []).filter(
+      (n) => !current.has(n.toLowerCase()) || mine.has(n.toLowerCase())
+    );
+    for (const name of [h.barn, h.reg, ...past]) {
       if (!name || name.length < 2) continue;
       const re = new RegExp(`(^|[^a-z0-9])${esc(name)}([^a-z0-9]|$)`, "gi");
       for (const m of text.matchAll(re)) out.push({ at: m.index!, id: h.id });

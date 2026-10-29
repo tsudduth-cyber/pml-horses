@@ -40,7 +40,10 @@ export default async function Page() {
       </Providers>
     );
   } catch (e: any) {
-    if (e?.message === "NOT_SIGNED_IN") {
+    // A 401 back from Graph is a sign-in that has run out, not SharePoint
+    // being down. Telling someone the system is broken when all they need
+    // to do is sign in again is how a working app gets reported as broken.
+    if (e?.message === "NOT_SIGNED_IN" || e?.status === 401) {
       return (
         <Providers>
           <SignIn note="Your session expired. Sign in again." />

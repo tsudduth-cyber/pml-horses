@@ -74,6 +74,11 @@ export interface Horse {
   charges: Charge[];
   /** Money committed in a signed contract but not yet billed. */
   committed: Charge[];
+  /**
+   * Names she used to go by. Paperwork already filed still carries them,
+   * so they have to keep matching her after a rename.
+   */
+  aka: string[];
   folderName: string | null;
   folderUrl: string | null;
   docs: Doc[];
@@ -152,6 +157,7 @@ export const EMPTY_HORSE: Horse = {
   sex: null, color: null, dob: null, bought: null, boughtNote: null,
   price: null, salePrice: null, soldOn: null, status: "wip", label: null,
   pedigree: null, breeding: null, notes: [], missing: [], care: {},
-  derived: {}, charges: [], committed: [], folderName: null, folderUrl: null,
+  derived: {}, charges: [], committed: [], aka: [],
+  folderName: null, folderUrl: null,
   docs: [], photos: [], sort: 900,
 };

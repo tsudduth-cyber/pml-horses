@@ -4,6 +4,8 @@ import { CARE_TASKS, EMPTY_HORSE } from "./types";
 import { readScan, scanIsStale } from "./scan";
 import { parseFolder, matchRow } from "./roster";
 import { readAliases, rememberNames } from "./aliases";
+import { readLinks, writeLinks } from "./links";
+import type { Links } from "./links";
 
 const HOST = process.env.SP_HOSTNAME!;
 const DRIVE = process.env.SP_DRIVE_ID!;
@@ -422,27 +424,57 @@ function folderWebUrl(folderName: string): string {
  */
 
 /** Folder names under /Horses/, including the sold ones a level down. */
-async function horseFolders(): Promise<string[]> {
+/** Record that a horse's folder is now called something else. */
+async function setFolderName(rowId: string, folder: string) {
+  try {
+    const { site, list } = await resolveIds();
+    await graph(`/sites/${site}/lists/${list}/items/${rowId}/fields`, {
+      method: "PATCH",
+      body: JSON.stringify({ FolderName: folder }),
+    });
+  } catch {
+    /* best effort — the id link already holds the horse together */
+  }
+}
+
+/** A horse's folder: what it is called now, and what it is. */
+export interface HorseFolder {
+  name: string;
+  /** The drive item id, which survives every rename. */
+  id: string;
+}
+
+async function horseFolders(): Promise<HorseFolder[]> {
   const list = async (path: string) => {
     try {
       const enc = encodeURIComponent(path).replace(/%2F/g, "/");
       const res: any = await graph(`/drives/${DRIVE}/root:/${enc}:/children?$top=200`);
-      return (res.value ?? []).filter((c: any) => c.folder).map((c: any) => c.name as string);
+      return (res.value ?? [])
+        .filter((c: any) => c.folder)
+        .map((c: any) => ({ name: c.name as string, id: String(c.id) }));
     } catch {
-      return [] as string[];
+      return [] as HorseFolder[];
     }
   };
   const top = await list(ROOT);
-  const sold = top.includes(SOLD_FOLDER) ? await list(`${ROOT}/${SOLD_FOLDER}`) : [];
+  const sold = top.some((f: HorseFolder) => f.name === SOLD_FOLDER)
+    ? await list(`${ROOT}/${SOLD_FOLDER}`)
+    : [];
   return [
     // Folders starting with _ are the app's own and shared material.
-    ...top.filter((n: string) => !n.startsWith("_") && n !== SOLD_FOLDER),
-    ...sold.map((n: string) => `${SOLD_FOLDER}/${n}`),
+    ...top.filter(
+      (f: HorseFolder) => !f.name.startsWith("_") && f.name !== SOLD_FOLDER
+    ),
+    ...sold.map((f: HorseFolder) => ({
+      ...f,
+      name: `${SOLD_FOLDER}/${f.name}`,
+    })),
   ];
 }
 
 export async function getHorses(): Promise<Horse[]> {
-  const [rows, folders, barnDocs, contractDocs, sharedDocs, aka] = await Promise.all([
+  const [rows, folders, barnDocs, contractDocs, sharedDocs, aka, links] =
+    await Promise.all([
     readList(),
     horseFolders(),
     // One farrier visit does the whole barn and produces one invoice, so
@@ -455,6 +487,7 @@ export async function getHorses(): Promise<Horse[]> {
       )
     ),
     readAliases(),
+    readLinks(),
   ]);
 
   /**
@@ -467,10 +500,31 @@ export async function getHorses(): Promise<Horse[]> {
    * no record still shows: that is how a new horse arrives.
    */
   const claimed = new Set<Horse>();
-  const horses: Horse[] = folders.map((folder) => {
+  const nextLinks: Links = {};
+  const renamed: { id: string; was: string; now: string }[] = [];
+
+  const horses: Horse[] = folders.map(({ name: folder, id: folderId }) => {
     const p = parseFolder(folder);
-    const row = matchRow(folder, p, rows, claimed);
-    if (row) claimed.add(row);
+
+    // The remembered link first. A folder keeps its id through a rename,
+    // so this holds even when the new name has nothing in common with the
+    // old one and no amount of name matching could bridge it.
+    const linked = links[folderId];
+    const row =
+      (linked
+        ? rows.find((r) => r.id === linked.row && !claimed.has(r))
+        : undefined) ?? matchRow(folder, p, rows, claimed);
+    if (row) {
+      claimed.add(row);
+      nextLinks[folderId] = { row: row.id, name: folder };
+
+      // Her old name is still on every document already filed. The name
+      // we last saw on this folder is the reliable one to retire; the
+      // record's own stored name is only used the first time we see the
+      // folder at all, since nothing has been learned yet.
+      const was = linked ? linked.name : row.folderName;
+      if (was && was !== folder) renamed.push({ id: row.id, was, now: folder });
+    }
 
     const base: Horse = row
       ? { ...row }
@@ -505,6 +559,19 @@ export async function getHorses(): Promise<Horse[]> {
   // Attached before anything is matched, because every match below —
   // barn documents, shared invoices, the scan — reads these.
   for (const h of horses) h.aka = aka[h.id] ?? [];
+
+  // Learned links and retired names are saved after the roster is built,
+  // and only when something actually changed, so an ordinary page load
+  // writes nothing.
+  void writeLinks(nextLinks, links);
+  for (const r of renamed) {
+    void rememberNames(r.id, [r.was]);
+    // Point the record at what the folder is called now. The id link
+    // would hold without this, but leaving a record saying it lives in a
+    // folder that no longer exists means the name fallback is dead the
+    // day that id changes — a folder deleted and recreated, or moved.
+    void setFolderName(r.id, r.now);
+  }
 
   // A shared document belongs to whichever horses its filename mentions.
   // One that names nobody belongs to nobody — unlike barn paperwork, a
@@ -932,5 +999,5 @@ async function mergeRows(
  * all of them is what makes the merge reachable.
  */
 export async function allFolders(): Promise<string[]> {
-  return (await horseFolders()).sort();
+  return (await horseFolders()).map((f) => f.name).sort();
 }

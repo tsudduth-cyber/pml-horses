@@ -645,6 +645,11 @@ export async function getHorses(): Promise<Horse[]> {
 
   // Care dates read out of the documents themselves beat ones guessed from a
   // filename — "Sully Vet.pdf" says nothing, the invoice inside says Coggins.
+  // Every document the app has seen, by id, so one the scanner matched
+  // from the inside can be put on the horse's page.
+  const byId = new Map<string, Doc>();
+  for (const d of [...sharedDocs, ...barnDocs]) if (d.id) byId.set(d.id, d);
+
   const scan = await readScan();
   if (scan) {
     for (const h of horses) {
@@ -674,6 +679,28 @@ export async function getHorses(): Promise<Horse[]> {
       }
       const owed = pick(scan.committed);
       if (owed) h.committed = [...owed];
+
+      // A document the app worked out is about her by reading it belongs
+      // on her page too. One vet visit covering sixteen head cannot name
+      // them in the filename — the path limit will not hold it — so
+      // without this the bill feeds her dates and her costs and then
+      // appears nowhere she can open it.
+      const mine =
+        scan.docs?.[h.id] ??
+        (h.folderName ? scan.docs?.[`folder:${h.folderName}`] : undefined);
+      if (mine?.length) {
+        const have = new Set(h.docs.map((d) => d.id));
+        const add = mine
+          .map((id) => byId.get(id))
+          .filter((d): d is Doc => !!d && !have.has(d.id));
+        if (add.length) {
+          h.docs = [...h.docs, ...add].sort(
+            (a, b) =>
+              Number(b.folder) - Number(a.folder) ||
+              a.name.localeCompare(b.name)
+          );
+        }
+      }
 
       const hits =
         scan.items[h.id] ??

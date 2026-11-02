@@ -30,8 +30,10 @@ export interface ScanHit {
  *    balance sheet's carrying values stop reading as care costs.
  * 6: match a horse's former names, so paperwork filed before a rename
  *    keeps finding her.
+ * 7: record which documents each horse was found inside, so a bill
+ *    covering the whole barn reaches every page it belongs on.
  */
-export const SCAN_VERSION = 6;
+export const SCAN_VERSION = 7;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -46,6 +48,16 @@ export interface Scan {
   spend?: Record<string, SpendHit[]>;
   /** horse id → money committed in a signed contract but not yet billed. */
   committed?: Record<string, SpendHit[]>;
+  /**
+   * horse id → ids of documents found to be about her by reading them.
+   *
+   * A document reaches a horse's page by her name being in the filename,
+   * which breaks down exactly when one document covers the whole barn:
+   * the path limit will not hold sixteen names. These are the ones the
+   * app worked out from the inside, so they show up on her page too
+   * rather than only feeding her dates.
+   */
+  docs?: Record<string, string[]>;
 }
 
 /* ---------- reading the saved scan ---------- */
@@ -446,6 +458,11 @@ export async function runScan(
 ): Promise<Scan> {
   const items: Scan["items"] = {};
   const spend: Scan["spend"] = {};
+  const found: Scan["docs"] = {};
+  const note = (id: string, docId: string) => {
+    const l = (found[id] ??= []);
+    if (!l.includes(docId)) l.push(docId);
+  };
 
   const seen = new Set<string>();
   const pdfs = docs
@@ -476,6 +493,7 @@ export async function runScan(
         // Only credit horses this document is already associated with, when
         // it came from a specific horse's folder.
         if (entry.ids.length && !entry.ids.includes(ev.id)) continue;
+        note(ev.id, entry.doc.id);
         const bucket = (items[ev.id] ??= {});
         const held = bucket[ev.key];
         if (!held || ev.date > held.date) {
@@ -497,6 +515,7 @@ export async function runScan(
       );
       for (const [id, hits] of Object.entries(billed)) {
         if (entry.ids.length && !entry.ids.includes(id)) continue;
+        note(id, entry.doc.id);
         (spend[id] ??= []).push(...hits);
       }
     })
@@ -534,6 +553,7 @@ export async function runScan(
     items,
     spend,
     committed,
+    docs: found,
   };
   try {
     await writeScan(scan);

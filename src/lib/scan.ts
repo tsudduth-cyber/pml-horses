@@ -86,11 +86,22 @@ async function writeScan(scan: Scan) {
 /** How old a scan may get before the next person to open the app redoes it. */
 export const STALE_MS = 4 * 60 * 60 * 1000;
 
-export function scanIsStale(scan: Scan | null) {
+export function scanIsStale(scan: Scan | null, newestDoc?: string) {
   if (!scan) return true;
   if ((scan.v ?? 1) !== SCAN_VERSION) return true;
   const at = Date.parse(scan.at);
-  return !Number.isFinite(at) || Date.now() - at > STALE_MS;
+  if (!Number.isFinite(at)) return true;
+
+  // Paperwork filed since the last read is the entire reason to read
+  // again. Waiting out a four hour clock means someone files a vet bill,
+  // opens the app to check it landed, sees nothing, and reports the app
+  // as broken — which is exactly what keeps happening.
+  if (newestDoc) {
+    const filed = Date.parse(newestDoc);
+    if (Number.isFinite(filed) && filed > at) return true;
+  }
+
+  return Date.now() - at > STALE_MS;
 }
 
 /* ---------- reading what a document says ---------- */

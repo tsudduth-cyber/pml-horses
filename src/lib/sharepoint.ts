@@ -715,7 +715,26 @@ export async function getHorses(): Promise<Horse[]> {
       }
     }
   }
-  staleScan = scanIsStale(scan);
+  // A "still missing" line naming something now on file has been
+  // answered. Nobody should have to go and delete it by hand, and a
+  // Coggins date sitting above "No Coggins on file" makes the whole page
+  // look wrong even where it is right.
+  for (const h of horses) {
+    if (!h.missing.length) continue;
+    h.missing = h.missing.filter((line) =>
+      !CARE_TASKS.some(
+        (t) => t.match.test(line) && (h.care[t.key] || h.derived[t.key])
+      )
+    );
+  }
+
+  // The newest thing filed anywhere. If it postdates the saved reading,
+  // that reading is out of date no matter what the clock says.
+  const newestDoc = lastDocIndex.reduce(
+    (m, e) => (e.doc.modified > m ? e.doc.modified : m),
+    ""
+  );
+  staleScan = scanIsStale(scan, newestDoc);
 
   return horses.sort(
     (a, b) =>

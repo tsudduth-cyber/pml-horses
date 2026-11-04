@@ -40,7 +40,7 @@ export interface ScanHit {
  *    office's Horse Info document.
  * 10: and from a digital AQHA certificate in the horse's own folder.
  */
-export const SCAN_VERSION = 10;
+export const SCAN_VERSION = 11;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;

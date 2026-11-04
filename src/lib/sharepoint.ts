@@ -248,9 +248,29 @@ async function readFolder(folderName: string) {
         .sort((a: Doc, b: Doc) => a.name.localeCompare(b.name));
     }
 
+    // Paperwork filed a level down — X-Rays, Health, AQHA — is still her
+    // paperwork. One level is enough: nothing is filed deeper than that,
+    // and this runs on every page load.
+    const subs = children.filter((c) => c.folder && c !== photosFolder);
+    const inside = await Promise.all(
+      subs.map(async (sub) => {
+        try {
+          const r: any = await graph(
+            `/drives/${DRIVE}/items/${sub.id}/children?$top=200`
+          );
+          return (r.value ?? [])
+            .filter((c: any) => !c.folder)
+            .map((c: any) => ({ ...toDoc(c), name: `${sub.name}/${c.name}` }));
+        } catch {
+          return [] as Doc[];
+        }
+      })
+    );
+
     const docs = children
       .filter((c) => c !== photosFolder)
       .map(toDoc)
+      .concat(...inside)
       .sort((a, b) => Number(b.folder) - Number(a.folder) || a.name.localeCompare(b.name));
 
     return { docs, photos };

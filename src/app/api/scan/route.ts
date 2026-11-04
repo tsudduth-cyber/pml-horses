@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     );
     // The office's Horse Info document, for the record fields no
     // readable paperwork carries. Blanks only.
-    const filled = await seedRecords(horses);
+    const filled = await seedRecords(horses, scan.certs);
     return Response.json({ ok: true, at: scan.at, found, filled });
   } catch (e: any) {
     const msg = String(e?.message ?? e);

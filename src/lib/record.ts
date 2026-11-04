@@ -224,3 +224,60 @@ export function blanksToFill(
   if (e.price !== null && h.price == null) f.Price = e.price;
   return f;
 }
+
+/* ---------- AQHA registration certificates ---------- */
+
+/** Does this text read as an AQHA certificate of registration? */
+export function isCertificate(text: string) {
+  return (
+    /American Quarter Horse Association/i.test(text) &&
+    /REGISTRATION NUMBER/i.test(text)
+  );
+}
+
+/**
+ * The record off a digital AQHA certificate.
+ *
+ * The first line carries everything in a fixed order — name, foaling
+ * date, colour, sex, registration number, then the sire — and the back
+ * repeats the name and number under labels. For a horse that arrives
+ * from now on this is the source, read from the certificate in her own
+ * folder the day it is filed, and nobody types anything. The older
+ * certificates are image scans with no text, which is what the Horse
+ * Info document covers.
+ */
+export function certificateEntry(text: string): RecordEntry | null {
+  if (!isCertificate(text)) return null;
+  const t = text.replace(/\s+/g, " ");
+
+  const aqha = t.match(/REGISTRATION NUMBER\s+(\d{7})\b/i)?.[1] ?? null;
+  const name = t.match(/REGISTERED NAME\s+([A-Z][A-Z' ]+?)\s+(?:DATE ISSUED|REGISTRATION)/)?.[1]?.trim() ?? null;
+  if (!aqha || !name) return null;
+
+  // "VINTAGE ENTERPRIZE May 28, 2021 Bay GELDING 6132734"
+  const head = t.match(
+    new RegExp(
+      `([A-Za-z]{3,9}\\s+\\d{1,2},\\s*\\d{4})\\s+([A-Za-z ]+?)\\s+(STALLION|MARE|GELDING|FILLY|COLT)\\s+${aqha}\\b`
+    )
+  );
+  const dob = head ? dateIn(head[1]) : null;
+  const color = head ? head[2].trim() : null;
+  const sexWord = head ? head[3] : t.match(/\b(STALLION|MARE|GELDING|FILLY|COLT)\b/)?.[1] ?? null;
+  const sex = sexWord ? sexWord[0] + sexWord.slice(1).toLowerCase() : null;
+
+  const acquired = t.match(/DATE ACQUIRED\s+([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})/i)?.[1];
+
+  return {
+    name: name
+      .toLowerCase()
+      .replace(/\b[a-z]/g, (c) => c.toUpperCase()),
+    raw: t,
+    barn: null,
+    aqha,
+    sex,
+    color: color ? color[0].toUpperCase() + color.slice(1).toLowerCase() : null,
+    dob,
+    bought: acquired ? dateIn(acquired) : null,
+    price: null,
+  };
+}

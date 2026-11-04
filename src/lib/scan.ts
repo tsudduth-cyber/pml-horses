@@ -1,6 +1,8 @@
 import { graph, graphRaw } from "./graph";
 import { CARE_TASKS } from "./types";
 import type { CareKey, Charge, Doc, Horse } from "./types";
+import { certificateEntry } from "./record";
+import type { RecordEntry } from "./record";
 
 const DRIVE = process.env.SP_DRIVE_ID!;
 const ROOT = process.env.SP_HORSES_PATH!;
@@ -36,8 +38,9 @@ export interface ScanHit {
  *    proximity, and ignore the "next due" blocks.
  * 9: fill AQHA numbers, foaling and purchase dates and prices from the
  *    office's Horse Info document.
+ * 10: and from a digital AQHA certificate in the horse's own folder.
  */
-export const SCAN_VERSION = 9;
+export const SCAN_VERSION = 10;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -495,10 +498,13 @@ export async function runScan(
   horses: Horse[],
   docs: { doc: Doc; ids: string[] }[],
   contracts: Doc[] = []
-): Promise<Scan> {
+): Promise<Scan & { certs: { id: string; entry: RecordEntry }[] }> {
   const items: Scan["items"] = {};
   const spend: Scan["spend"] = {};
   const found: Scan["docs"] = {};
+  /** Registration certificates found in a horse's own folder. Not saved
+   *  with the scan — they are applied to her record straight away. */
+  const certs: { id: string; entry: RecordEntry }[] = [];
   const note = (id: string, docId: string) => {
     const l = (found[id] ??= []);
     if (!l.includes(docId)) l.push(docId);
@@ -527,6 +533,15 @@ export async function runScan(
       // A document found through a horse's own folder is about that horse
       // even when the text never names her.
       const scoped = horses.filter((h) => entry.ids.includes(h.id));
+
+      // Her registration certificate, if that is what this is. Only from
+      // her own folder: a certificate in a shared folder names a horse on
+      // its face but filing it under the wrong one is an easy mistake,
+      // and the folder is the office's own statement of whose it is.
+      if (scoped.length === 1) {
+        const c = certificateEntry(text);
+        if (c) certs.push({ id: scoped[0].id, entry: c });
+      }
       const found = eventsIn(text, horses.length ? horses : []);
 
       for (const ev of found) {
@@ -600,5 +615,5 @@ export async function runScan(
   } catch {
     /* the scan still returns; it just will not be reused */
   }
-  return scan;
+  return Object.assign(scan, { certs });
 }

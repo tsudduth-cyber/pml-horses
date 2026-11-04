@@ -6,6 +6,7 @@ import { parseFolder, matchRow } from "./roster";
 import { readAliases, rememberNames } from "./aliases";
 import { readLinks, writeLinks } from "./links";
 import { parseHorseInfo, matchEntry, blanksToFill } from "./record";
+import type { RecordEntry } from "./record";
 import { graphRaw } from "./graph";
 import type { Links } from "./links";
 
@@ -474,25 +475,40 @@ async function horseInfoDoc() {
  * Runs as part of the scan, as whoever opened the app, so it needs no
  * standing job and no one has to press anything.
  */
-export async function seedRecords(horses: Horse[]): Promise<number> {
-  const doc = lastInfoDoc ?? (await horseInfoDoc());
-  if (!doc) return 0;
-
-  let text = "";
-  try {
-    // Word has no text endpoint; Graph will render it as PDF on request.
-    const res = await graphRaw(`/drives/${DRIVE}/items/${doc.id}/content?format=pdf`);
-    text = await pdfText(Buffer.from(await res.arrayBuffer()));
-  } catch {
-    return 0;
-  }
-  if (text.trim().length < 200) return 0;
-
+export async function seedRecords(
+  horses: Horse[],
+  certs: { id: string; entry: RecordEntry }[] = []
+): Promise<number> {
   const { site, list } = await resolveIds();
   let filled = 0;
-  for (const entry of parseHorseInfo(text)) {
-    const h = matchEntry(entry, horses);
-    if (!h) continue;
+
+  // What to fill, and on whom. Certificates first: they are the horse's
+  // own paperwork, filed in her own folder, and beat a typed summary.
+  const work: { h: Horse; entry: RecordEntry }[] = [];
+  for (const c of certs) {
+    const h = horses.find((x) => x.id === c.id);
+    if (h) work.push({ h, entry: c.entry });
+  }
+
+  const doc = lastInfoDoc ?? (await horseInfoDoc());
+  if (doc) {
+    let text = "";
+    try {
+      // Word has no text endpoint; Graph will render it as PDF on request.
+      const res = await graphRaw(`/drives/${DRIVE}/items/${doc.id}/content?format=pdf`);
+      text = await pdfText(Buffer.from(await res.arrayBuffer()));
+    } catch {
+      /* no document, or unreadable — certificates still apply */
+    }
+    if (text.trim().length >= 200) {
+      for (const entry of parseHorseInfo(text)) {
+        const h = matchEntry(entry, horses);
+        if (h) work.push({ h, entry });
+      }
+    }
+  }
+
+  for (const { h, entry } of work) {
     const fields = blanksToFill(entry, h);
     if (!Object.keys(fields).length) continue;
     try {
@@ -502,6 +518,16 @@ export async function seedRecords(horses: Horse[]): Promise<number> {
         body: JSON.stringify(fields),
       });
       filled += Object.keys(fields).length;
+      // Mark her filled in memory, so a later entry for the same horse —
+      // the document after her certificate — only fills what is still
+      // blank rather than writing over what was just read off the better
+      // source.
+      if ("AQHA" in fields) h.aqha = String(fields.AQHA);
+      if ("Sex" in fields) h.sex = String(fields.Sex);
+      if ("Color" in fields) h.color = String(fields.Color);
+      if ("Foaled" in fields) h.dob = String(fields.Foaled).slice(0, 10);
+      if ("Bought" in fields) h.bought = String(fields.Bought).slice(0, 10);
+      if ("Price" in fields) h.price = Number(fields.Price);
     } catch {
       /* one row failing must not stop the rest */
     }

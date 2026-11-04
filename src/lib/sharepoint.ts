@@ -827,11 +827,19 @@ export async function getHorses(): Promise<Horse[]> {
   // look like it is inventing paperwork. Names differ, bytes do not.
   for (const h of horses) {
     if (h.docs.length < 2) continue;
-    const seen = new Set<number>();
+    const sizes = new Set<number>();
+    const names = new Set<string>();
     h.docs = h.docs.filter((d) => {
-      if (d.folder || d.size < 1024) return true;
-      if (seen.has(d.size)) return false;
-      seen.add(d.size);
+      if (d.folder) return true;
+      // Same name in two folders — the transfer form in her folder and
+      // again in AQHA — is one document whatever the bytes say.
+      const n = d.name.trim().toLowerCase();
+      if (names.has(n)) return false;
+      names.add(n);
+      if (d.size >= 1024) {
+        if (sizes.has(d.size)) return false;
+        sizes.add(d.size);
+      }
       return true;
     });
   }

@@ -1,4 +1,4 @@
-import { getHorses, scanState } from "@/lib/sharepoint";
+import { getHorses, scanState, seedRecords } from "@/lib/sharepoint";
 import { runScan } from "@/lib/scan";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +31,10 @@ export async function POST(req: Request) {
       (n, h) => n + Object.keys(h).length,
       0
     );
-    return Response.json({ ok: true, at: scan.at, found });
+    // The office's Horse Info document, for the record fields no
+    // readable paperwork carries. Blanks only.
+    const filled = await seedRecords(horses);
+    return Response.json({ ok: true, at: scan.at, found, filled });
   } catch (e: any) {
     const msg = String(e?.message ?? e);
     if (msg === "NOT_SIGNED_IN") {

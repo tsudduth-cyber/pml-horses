@@ -1,10 +1,12 @@
 import { graph, graphAll } from "./graph";
 import type { Horse, Doc, Status, CareKey, DerivedCare, Charge } from "./types";
 import { CARE_TASKS, EMPTY_HORSE } from "./types";
-import { readScan, scanIsStale } from "./scan";
+import { readScan, scanIsStale, pdfText } from "./scan";
 import { parseFolder, matchRow } from "./roster";
 import { readAliases, rememberNames } from "./aliases";
 import { readLinks, writeLinks } from "./links";
+import { parseHorseInfo, matchEntry, blanksToFill } from "./record";
+import { graphRaw } from "./graph";
 import type { Links } from "./links";
 
 const HOST = process.env.SP_HOSTNAME!;
@@ -438,6 +440,75 @@ async function setFolderName(rowId: string, folder: string) {
   }
 }
 
+/**
+ * The office's "Horse Info & Registration Status" document, if it is
+ * there. It lives at the top of /Horses/, beside the folders.
+ */
+let lastInfoDoc: { id: string; name: string; modified: string } | null = null;
+async function horseInfoDoc() {
+  try {
+    const enc = encodeURIComponent(ROOT).replace(/%2F/g, "/");
+    const res: any = await graph(`/drives/${DRIVE}/root:/${enc}:/children?$top=200`);
+    const hit = (res.value ?? []).find(
+      (c: any) => !c.folder && /horse info/i.test(c.name) && /\.docx?$/i.test(c.name)
+    );
+    lastInfoDoc = hit
+      ? { id: String(hit.id), name: hit.name, modified: hit.lastModifiedDateTime ?? "" }
+      : null;
+  } catch {
+    lastInfoDoc = null;
+  }
+  return lastInfoDoc;
+}
+
+/**
+ * Fill in what the office's document knows and the app does not.
+ *
+ * AQHA numbers, foaling dates, purchase dates and prices are on no
+ * machine-readable paperwork — the older certificates and bills of sale
+ * are image scans — so the one place they exist is the document Kristina
+ * keeps. The app reads it whenever it changes and fills blanks. Only
+ * blanks: a value already in the app, however it got there, is never
+ * overwritten, and nothing is written that was not read with confidence.
+ *
+ * Runs as part of the scan, as whoever opened the app, so it needs no
+ * standing job and no one has to press anything.
+ */
+export async function seedRecords(horses: Horse[]): Promise<number> {
+  const doc = lastInfoDoc ?? (await horseInfoDoc());
+  if (!doc) return 0;
+
+  let text = "";
+  try {
+    // Word has no text endpoint; Graph will render it as PDF on request.
+    const res = await graphRaw(`/drives/${DRIVE}/items/${doc.id}/content?format=pdf`);
+    text = await pdfText(Buffer.from(await res.arrayBuffer()));
+  } catch {
+    return 0;
+  }
+  if (text.trim().length < 200) return 0;
+
+  const { site, list } = await resolveIds();
+  let filled = 0;
+  for (const entry of parseHorseInfo(text)) {
+    const h = matchEntry(entry, horses);
+    if (!h) continue;
+    const fields = blanksToFill(entry, h);
+    if (!Object.keys(fields).length) continue;
+    try {
+      const row = await resolveItemId(h.id);
+      await graph(`/sites/${site}/lists/${list}/items/${row}/fields`, {
+        method: "PATCH",
+        body: JSON.stringify(fields),
+      });
+      filled += Object.keys(fields).length;
+    } catch {
+      /* one row failing must not stop the rest */
+    }
+  }
+  return filled;
+}
+
 /** Words that say nothing about which document a missing line means. */
 const STOPWORDS = new Set([
   "the","and","not","yet","for","from","have","has","still","missing","none",
@@ -771,10 +842,11 @@ export async function getHorses(): Promise<Horse[]> {
 
   // The newest thing filed anywhere. If it postdates the saved reading,
   // that reading is out of date no matter what the clock says.
-  const newestDoc = lastDocIndex.reduce(
-    (m, e) => (e.doc.modified > m ? e.doc.modified : m),
-    ""
-  );
+  const info = await horseInfoDoc();
+  const newestDoc = [
+    ...lastDocIndex.map((e) => e.doc.modified),
+    info?.modified ?? "",
+  ].reduce((m, d) => (d > m ? d : m), "");
   staleScan = scanIsStale(scan, newestDoc);
 
   return horses.sort(

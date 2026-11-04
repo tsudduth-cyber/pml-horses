@@ -34,8 +34,10 @@ export interface ScanHit {
  *    covering the whole barn reaches every page it belongs on.
  * 8: read a vet invoice as sections per patient rather than by
  *    proximity, and ignore the "next due" blocks.
+ * 9: fill AQHA numbers, foaling and purchase dates and prices from the
+ *    office's Horse Info document.
  */
-export const SCAN_VERSION = 8;
+export const SCAN_VERSION = 9;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -469,9 +471,13 @@ export function contractCommitment(
 
 /* ---------- the scan itself ---------- */
 
-async function pdfText(itemId: string): Promise<string> {
-  const res = await graphRaw(`/drives/${DRIVE}/items/${itemId}/content`);
-  const buf = new Uint8Array(await res.arrayBuffer());
+export async function pdfText(src: string | Buffer | Uint8Array): Promise<string> {
+  const buf =
+    typeof src === "string"
+      ? new Uint8Array(
+          await (await graphRaw(`/drives/${DRIVE}/items/${src}/content`)).arrayBuffer()
+        )
+      : new Uint8Array(src);
   const { extractText, getDocumentProxy } = await import("unpdf");
   const doc = await getDocumentProxy(buf);
   const { text } = await extractText(doc, { mergePages: true });

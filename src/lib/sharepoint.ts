@@ -213,6 +213,7 @@ function toDoc(c: any): Doc {
     url: c.webUrl,
     folder: !!c.folder,
     modified: c.lastModifiedDateTime ?? "",
+    size: Number(c.size ?? 0) || 0,
   };
 }
 
@@ -436,6 +437,14 @@ async function setFolderName(rowId: string, folder: string) {
     /* best effort — the id link already holds the horse together */
   }
 }
+
+/** Words that say nothing about which document a missing line means. */
+const STOPWORDS = new Set([
+  "the","and","not","yet","for","from","have","has","still","missing","none",
+  "need","needs","needed","file","filed","copy","original","her","his","she",
+  "before","ships","ship","back","returned","return","with","this","that",
+  "received","waiting","pending","confirm","confirmed","unconfirmed","per",
+]);
 
 /** A horse's folder: what it is called now, and what it is. */
 export interface HorseFolder {
@@ -715,17 +724,49 @@ export async function getHorses(): Promise<Horse[]> {
       }
     }
   }
+  // One document filed in two places is one document. The farrier's own
+  // "Invoice 1038.pdf" and the office's renamed copy in Payables are the
+  // same eight pages, and showing both on a horse's page makes the app
+  // look like it is inventing paperwork. Names differ, bytes do not.
+  for (const h of horses) {
+    if (h.docs.length < 2) continue;
+    const seen = new Set<number>();
+    h.docs = h.docs.filter((d) => {
+      if (d.folder || d.size < 1024) return true;
+      if (seen.has(d.size)) return false;
+      seen.add(d.size);
+      return true;
+    });
+  }
+
   // A "still missing" line naming something now on file has been
   // answered. Nobody should have to go and delete it by hand, and a
   // Coggins date sitting above "No Coggins on file" makes the whole page
   // look wrong even where it is right.
   for (const h of horses) {
     if (!h.missing.length) continue;
-    h.missing = h.missing.filter((line) =>
-      !CARE_TASKS.some(
-        (t) => t.match.test(line) && (h.care[t.key] || h.derived[t.key])
-      )
-    );
+    const filed = h.docs.map((d) => d.name.toLowerCase());
+    h.missing = h.missing.filter((line) => {
+      if (
+        CARE_TASKS.some(
+          (t) => t.match.test(line) && (h.care[t.key] || h.derived[t.key])
+        )
+      ) {
+        return false;
+      }
+      // Or the document itself has turned up: "Signed Bill of Sale" is
+      // answered by a file whose name carries those words. Every word has
+      // to match, so "AQHA transfer not back" is not cleared by a transfer
+      // form that is on file but not yet returned.
+      const words = line
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length > 2 && !STOPWORDS.has(w));
+      if (words.length >= 2 && filed.some((n) => words.every((w) => n.includes(w)))) {
+        return false;
+      }
+      return true;
+    });
   }
 
   // The newest thing filed anywhere. If it postdates the saved reading,

@@ -32,8 +32,10 @@ export interface ScanHit {
  *    keeps finding her.
  * 7: record which documents each horse was found inside, so a bill
  *    covering the whole barn reaches every page it belongs on.
+ * 8: read a vet invoice as sections per patient rather than by
+ *    proximity, and ignore the "next due" blocks.
  */
-export const SCAN_VERSION = 7;
+export const SCAN_VERSION = 8;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -186,33 +188,48 @@ function nearest<T extends { at: number }>(
   return best;
 }
 
+/** How far back a patient's section can run before its name stops counting. */
+const SECTION = 1500;
+/** How close after a service a name must sit to beat the one before it. */
+const AHEAD = 40;
+
 /**
- * The nearest entry on either side of `at`, within `window` characters.
+ * Whose line this is.
  *
- * Which side the horse's name falls on depends on how the invoice is laid
- * out. "Sully | Oct 13 | Coggins" puts it before the service; the farrier's
- * "10/26/2026 Trim lizard" puts it after. Looking only backwards credited
- * every line on that second kind to the horse on the line above, so the
- * whole barn came out shifted by one. Ties go to the earlier one, which is
- * the way a row usually reads.
+ * A vet invoice is sectioned by patient: a name, then everything done to
+ * her, then the next name. A farrier invoice is a flat table where the
+ * name sits inside the row, just after the service. Both are normal and
+ * they want opposite rules.
+ *
+ * So the name BEFORE the service wins, across a whole section — North
+ * Texas Veterinary's run to several hundred characters — and a name after
+ * it only wins when it is right there, which is the farrier's "Trim
+ * lizard". Picking whichever was simply nearest looked reasonable and
+ * credited twelve of seventeen horses to nobody, because their names sat
+ * further from their own treatments than the window allowed.
  */
-function nearestEither<T extends { at: number }>(
-  list: T[],
-  at: number,
-  window: number
-): T | null {
-  let best: T | null = null;
-  let gap = Infinity;
+function horseFor<T extends { at: number }>(list: T[], at: number): T | null {
+  let before: T | null = null;
+  let after: T | null = null;
   for (const e of list) {
-    const d = Math.abs(e.at - at);
-    if (d > window) continue;
-    if (d < gap) {
-      gap = d;
-      best = e;
+    if (e.at <= at) {
+      if (at - e.at <= SECTION) before = e;
+    } else {
+      if (e.at - at <= AHEAD) after = e;
+      break;
     }
   }
-  return best;
+  if (after && (!before || after.at - at < at - before.at)) return after;
+  return before;
 }
+
+/**
+ * "Vacc Equine - Rabies:   10/25/2027" is when it is next due, not a shot
+ * anyone gave. It sits in a block at the head of every section on a vet
+ * invoice, and read as work done it backdates a vaccination onto whatever
+ * date happens to be nearby.
+ */
+const DUE_LINE = /^[^\n]{0,40}?:\s*\d{1,2}[./-]\d{1,2}[./-]\d{2,4}/;
 
 /**
  * Pull care events out of a document's text.
@@ -226,6 +243,7 @@ export function eventsIn(
   text: string,
   horses: Horse[]
 ): { id: string; key: CareKey; date: string; line: string }[] {
+  const today = new Date().toISOString().slice(0, 10);
   const dates = datesIn(text);
   const named = horsesIn(text, horses);
   const out: { id: string; key: CareKey; date: string; line: string }[] = [];
@@ -233,9 +251,14 @@ export function eventsIn(
   for (const t of CARE_TASKS) {
     const re = new RegExp(t.match.source, "gi");
     for (const m of text.matchAll(re)) {
-      const d = nearest(dates, m.index!, 160);
-      const h = nearestEither(named, m.index!, 160);
+      if (DUE_LINE.test(text.slice(m.index!))) continue;
+      // The date sits once at the head of a section's table and the rows
+      // below it carry none, so it reaches as far back as the name does.
+      const d = nearest(dates, m.index!, SECTION);
+      const h = horseFor(named, m.index!);
       if (!d || !h) continue;
+      // A date still ahead is something booked, never something done.
+      if (d.date > today) continue;
       out.push({
         id: h.id,
         key: t.key,

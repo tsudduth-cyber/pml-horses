@@ -35,6 +35,8 @@ export interface Doc {
   url: string;
   folder: boolean;
   modified: string;
+  /** Bytes. Two files this size are the same document filed twice. */
+  size: number;
 }
 
 export interface Horse {

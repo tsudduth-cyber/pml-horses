@@ -849,8 +849,13 @@ export async function getHorses(): Promise<Horse[]> {
     if (h.docs.length < 2) continue;
     const sizes = new Set<number>();
     const names = new Set<string>();
+    const ids = new Set(h.docs.map((d) => d.id));
     h.docs = h.docs.filter((d) => {
       if (d.folder) return true;
+      // The scanner read it and found it says the same as another copy
+      // she already has. Bytes differ when two people save one PDF.
+      const copyOf = scan?.same?.[d.id];
+      if (copyOf && ids.has(copyOf)) return false;
       // Same name in two folders — the transfer form in her folder and
       // again in AQHA — is one document whatever the bytes say.
       const n = d.name.trim().toLowerCase();

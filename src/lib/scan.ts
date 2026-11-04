@@ -40,7 +40,7 @@ export interface ScanHit {
  *    office's Horse Info document.
  * 10: and from a digital AQHA certificate in the horse's own folder.
  */
-export const SCAN_VERSION = 11;
+export const SCAN_VERSION = 12;
 
 /** One charge read off an invoice, attributed to one horse. */
 export type SpendHit = Charge;
@@ -55,6 +55,12 @@ export interface Scan {
   spend?: Record<string, SpendHit[]>;
   /** horse id → money committed in a signed contract but not yet billed. */
   committed?: Record<string, SpendHit[]>;
+  /**
+   * document id → the id of the copy it duplicates. The farrier's
+   * "Invoice 1038.pdf" and the office's renamed copy in Payables are
+   * re-saved separately, so their bytes differ; their text does not.
+   */
+  same?: Record<string, string>;
   /**
    * horse id → ids of documents found to be about her by reading them.
    *
@@ -494,6 +500,11 @@ export async function pdfText(src: string | Buffer | Uint8Array): Promise<string
  * not on a schedule. Graph access here is delegated, so a cron job would
  * have nobody to act as; the person opening the app does.
  */
+/** What a document says, flattened so two saves of one file agree. */
+export function fingerprint(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 1200);
+}
+
 export async function runScan(
   horses: Horse[],
   docs: { doc: Doc; ids: string[] }[],
@@ -509,6 +520,10 @@ export async function runScan(
     const l = (found[id] ??= []);
     if (!l.includes(docId)) l.push(docId);
   };
+
+  /** Text fingerprint → the first document that carried it. */
+  const prints = new Map<string, string>();
+  const same: Scan["same"] = {};
 
   const seen = new Set<string>();
   const pdfs = docs
@@ -533,6 +548,17 @@ export async function runScan(
       // A document found through a horse's own folder is about that horse
       // even when the text never names her.
       const scoped = horses.filter((h) => entry.ids.includes(h.id));
+
+      // The same paperwork saved twice, under two names, by two people.
+      // Reading both would be harmless here — charges are deduped — but
+      // both would then sit on her page. Remember which is the copy.
+      const print = fingerprint(text);
+      const first = prints.get(print);
+      if (first && first !== entry.doc.id) {
+        same[entry.doc.id] = first;
+      } else if (!first) {
+        prints.set(print, entry.doc.id);
+      }
 
       // Her registration certificate, if that is what this is. Only from
       // her own folder: a certificate in a shared folder names a horse on
@@ -609,6 +635,7 @@ export async function runScan(
     spend,
     committed,
     docs: found,
+    same,
   };
   try {
     await writeScan(scan);

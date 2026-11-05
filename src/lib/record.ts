@@ -220,10 +220,24 @@ export function blanksToFill(
   if (e.sex && !h.sex) f.Sex = e.sex;
   if (e.color && !h.color) f.Color = e.color;
   if (e.dob && !h.dob) f.Foaled = `${e.dob}T12:00:00Z`;
-  if (e.bought && !h.bought) f.Bought = `${e.bought}T12:00:00Z`;
+  // A purchase date the office itself flagged — "unconfirmed", "month
+  // only — day not recorded" — is a placeholder, not a decision, and the
+  // Horse Info document is where the real one lives. Maybelle sat on
+  // 7/1 month-only while the document had 7/28 the whole time. So a
+  // flagged date is replaced and the flag cleared; an unflagged one is
+  // somebody's answer and is left alone.
+  const provisional = !!h.boughtNote && PROVISIONAL.test(h.boughtNote);
+  if (e.bought && (!h.bought || provisional)) {
+    f.Bought = `${e.bought}T12:00:00Z`;
+    if (h.boughtNote) f.BoughtNote = "";
+  }
   if (e.price !== null && h.price == null) f.Price = e.price;
   return f;
 }
+
+/** A value the office wrote down as not settled yet. */
+const PROVISIONAL =
+  /\b(unconfirmed|month only|approx\w*|estimated?|unknown|tbd)\b|\?/i;
 
 /* ---------- AQHA registration certificates ---------- */
 

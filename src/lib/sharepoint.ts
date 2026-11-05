@@ -556,6 +556,40 @@ export async function seedRecords(
   return filled;
 }
 
+/**
+ * A "still missing" line that names a record field, and how to tell
+ * whether that field now holds an answer.
+ *
+ * The record fills itself from Kristina's Horse Info document, but the
+ * line she wrote when it was blank had no way to know that — so Chasin
+ * Checks carried "No AQHA number" above his AQHA number. This closes
+ * that gap.
+ */
+const RECORD_GAPS: { match: RegExp; settled: (h: Horse) => boolean }[] = [
+  {
+    match: /\b(aqha|registration|reg)\b[^\n]{0,24}\b(number|num|no|#)\b|\baqha\s*#/i,
+    settled: (h) => !!h.aqha,
+  },
+  {
+    match: /\bdate of (sale|purchase)\b|\b(purchase|sale|bought|acquired)\b[^\n]{0,24}\bdate\b/i,
+    settled: (h) => !!h.bought && !h.boughtNote,
+  },
+  { match: /\b(purchase\s+)?price\b/i, settled: (h) => h.price != null },
+  {
+    match: /\b(dob|date of birth|birth\s?date|foaling date|foaled)\b/i,
+    settled: (h) => !!h.dob,
+  },
+  { match: /\bcolou?r\b/i, settled: (h) => !!h.color },
+];
+
+/**
+ * Words that mean the line is about a piece of paper, not a field. "AQHA
+ * transfer not back yet" is not answered by an AQHA number being on file,
+ * and must not be struck through because one turned up.
+ */
+const ABOUT_A_DOCUMENT =
+  /\b(transfer|certificate|cert|papers?|form|bill|contract|agreement|receipt|check|invoice|coggins|records?|signed)\b/i;
+
 /** Words that say nothing about which document a missing line means. */
 const STOPWORDS = new Set([
   "the","and","not","yet","for","from","have","has","still","missing","none",
@@ -884,6 +918,13 @@ export async function getHorses(): Promise<Horse[]> {
         CARE_TASKS.some(
           (t) => t.match.test(line) && (h.care[t.key] || h.derived[t.key])
         )
+      ) {
+        return true;
+      }
+      // Or the field it asks for is now on the record.
+      if (
+        !ABOUT_A_DOCUMENT.test(line) &&
+        RECORD_GAPS.some((g) => g.match.test(line) && g.settled(h))
       ) {
         return true;
       }

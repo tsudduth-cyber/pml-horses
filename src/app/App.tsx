@@ -326,6 +326,7 @@ function Lines({
   field,
   label,
   lines,
+  done,
   tone,
   onSave,
 }: {
@@ -333,6 +334,8 @@ function Lines({
   field: "notes" | "missing";
   label: string;
   lines: string[];
+  /** Lines to show struck through — on file, but still on the list. */
+  done?: string[];
   tone?: "alert";
   onSave: (field: "notes" | "missing", lines: string[]) => Promise<void>;
 }) {
@@ -397,7 +400,9 @@ function Lines({
       ) : tone === "alert" ? (
         <ul>
           {lines.map((m, i) => (
-            <li key={i}>{m}</li>
+            <li key={i} className={done?.includes(m) ? "done" : undefined}>
+              {m}
+            </li>
           ))}
         </ul>
       ) : (
@@ -773,12 +778,17 @@ function Detail({
       </section>
 
       <section className="sec">
-        <div className={h.missing.length ? "missing" : undefined}>
+        <div
+          className={
+            h.missing.length > h.answered.length ? "missing" : "missing calm"
+          }
+        >
           <Lines
             horse={h}
             field="missing"
             label="STILL MISSING"
             lines={h.missing}
+            done={h.answered}
             tone="alert"
             onSave={onSaveText}
           />
@@ -1108,10 +1118,11 @@ export default function App({
                     {sub && <div className="reg">{sub}</div>}
                     {bits && <div className="meta">{bits}</div>}
                     <Flag h={h} />
-                    {h.missing.length > 0 && (
+                    {h.missing.length > h.answered.length && (
                       <div className="gapline">
-                        {h.missing.length} thing
-                        {h.missing.length > 1 ? "s" : ""} missing
+                        {h.missing.length - h.answered.length} thing
+                        {h.missing.length - h.answered.length > 1 ? "s" : ""}{" "}
+                        missing
                       </div>
                     )}
                   </div>

@@ -63,6 +63,12 @@ export interface Horse {
   breeding: string | null;
   notes: string[];
   missing: string[];
+  /**
+   * The subset of `missing` the app believes is now on file. Shown struck
+   * through rather than removed: the list is Kristina's, and a heuristic
+   * that is wrong once must not delete her note.
+   */
+  answered: string[];
   /** Entered by hand in the app. Always wins over a derived date. */
   care: Partial<Record<CareKey, string>>;
   /** Read off filed paperwork. Used only where `care` has nothing. */
@@ -158,7 +164,7 @@ export const EMPTY_HORSE: Horse = {
   id: "", reg: null, barn: null, pending: false, idline: null, aqha: null,
   sex: null, color: null, dob: null, bought: null, boughtNote: null,
   price: null, salePrice: null, soldOn: null, status: "wip", label: null,
-  pedigree: null, breeding: null, notes: [], missing: [], care: {},
+  pedigree: null, breeding: null, notes: [], missing: [], answered: [], care: {},
   derived: {}, charges: [], committed: [], aka: [],
   folderName: null, folderUrl: null,
   docs: [], photos: [], sort: 900,

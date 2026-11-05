@@ -195,6 +195,7 @@ async function readList(): Promise<Horse[]> {
       breeding: str(f.BreedingTo),
       notes: lines(f.Notes),
       missing: lines(f.Missing),
+      answered: [],
       care,
       derived: {},
       charges: [],
@@ -659,7 +660,7 @@ export async function getHorses(): Promise<Horse[]> {
           // Fresh collections per horse. The spread is shallow, so without
           // these every folder-driven horse would share one notes array and
           // one care object with all the others.
-          notes: [], missing: [], care: {}, derived: {}, charges: [],
+          notes: [], missing: [], answered: [], care: {}, derived: {}, charges: [],
           committed: [], aka: [], docs: [], photos: [],
           id: `folder:${folder}`,
           status: folder.startsWith(`${SOLD_FOLDER}/`) ? "off" : "wip",
@@ -870,19 +871,21 @@ export async function getHorses(): Promise<Horse[]> {
   }
 
   // A "still missing" line naming something now on file has been
-  // answered. Nobody should have to go and delete it by hand, and a
-  // Coggins date sitting above "No Coggins on file" makes the whole page
-  // look wrong even where it is right.
+  // answered. It is marked, not removed: the app used to drop it from the
+  // list it then handed to the editor, so the next time anyone edited
+  // Missing on that horse the line was overwritten out of SharePoint for
+  // good. Marking keeps one copy of the truth in the list and lets the
+  // page stop shouting about something that has turned up.
   for (const h of horses) {
     if (!h.missing.length) continue;
     const filed = h.docs.map((d) => d.name.toLowerCase());
-    h.missing = h.missing.filter((line) => {
+    h.answered = h.missing.filter((line) => {
       if (
         CARE_TASKS.some(
           (t) => t.match.test(line) && (h.care[t.key] || h.derived[t.key])
         )
       ) {
-        return false;
+        return true;
       }
       // Or the document itself has turned up: "Signed Bill of Sale" is
       // answered by a file whose name carries those words. Every word has
@@ -892,10 +895,7 @@ export async function getHorses(): Promise<Horse[]> {
         .toLowerCase()
         .split(/[^a-z0-9]+/)
         .filter((w) => w.length > 2 && !STOPWORDS.has(w));
-      if (words.length >= 2 && filed.some((n) => words.every((w) => n.includes(w)))) {
-        return false;
-      }
-      return true;
+      return words.length >= 2 && filed.some((n) => words.every((w) => n.includes(w)));
     });
   }
 

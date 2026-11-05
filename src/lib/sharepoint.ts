@@ -884,13 +884,20 @@ export async function getHorses(): Promise<Horse[]> {
     if (h.docs.length < 2) continue;
     const sizes = new Set<number>();
     const names = new Set<string>();
-    const ids = new Set(h.docs.map((d) => d.id));
+    // Every copy of one document answers to the same id, so keeping the
+    // first of each group keeps exactly one. The earlier rule only
+    // dropped a copy when the original was on this same horse — and the
+    // original of the farrier bill lives in Appaloosa Recip's folder, so
+    // on every other horse both copies survived it.
+    const groups = new Set<string>();
     h.docs = h.docs.filter((d) => {
       if (d.folder) return true;
-      // The scanner read it and found it says the same as another copy
-      // she already has. Bytes differ when two people save one PDF.
-      const copyOf = scan?.same?.[d.id];
-      if (copyOf && ids.has(copyOf)) return false;
+      // The scanner read both and found they say the same thing. Bytes
+      // differ when two people save one PDF, so this is the only rule
+      // that catches Payables' copy and the farrier's own.
+      const group = scan?.same?.[d.id] ?? d.id;
+      if (groups.has(group)) return false;
+      groups.add(group);
       // Same name in two folders — the transfer form in her folder and
       // again in AQHA — is one document whatever the bytes say.
       const n = d.name.trim().toLowerCase();

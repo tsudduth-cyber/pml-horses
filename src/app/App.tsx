@@ -321,23 +321,29 @@ function RecordEditor({
  * to write them, and the two drifted apart. One line per note; an empty
  * line is dropped on save.
  */
+/** The lists on a horse's page the office can edit in place. */
+type TextField = "notes" | "missing" | "aka";
+
 function Lines({
   horse,
   field,
   label,
   lines,
   done,
+  hint,
   tone,
   onSave,
 }: {
   horse: Horse;
-  field: "notes" | "missing";
+  field: TextField;
   label: string;
   lines: string[];
   /** Lines to show struck through — on file, but still on the list. */
   done?: string[];
+  /** Shown above the editor when the list needs saying what it is for. */
+  hint?: string;
   tone?: "alert";
-  onSave: (field: "notes" | "missing", lines: string[]) => Promise<void>;
+  onSave: (field: TextField, lines: string[]) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -376,6 +382,7 @@ function Lines({
 
       {editing ? (
         <>
+          {hint && <p className="hint">{hint}</p>}
           <textarea
             className="lines"
             value={draft}
@@ -589,7 +596,7 @@ function Detail({
   showMoney: boolean;
   onBack: () => void;
   onSave: (key: CareKey, date: string | null) => Promise<void>;
-  onSaveText: (field: "notes" | "missing", lines: string[]) => Promise<void>;
+  onSaveText: (field: TextField, lines: string[]) => Promise<void>;
   onSaveRecord: (patch: Record<string, string | null>) => Promise<void>;
   folders: string[];
   heldBy: Record<string, string>;
@@ -795,6 +802,17 @@ function Detail({
         </div>
       </section>
 
+      <section className="sec">
+        <Lines
+          horse={h}
+          field="aka"
+          label="ALSO GOES BY"
+          lines={h.aka}
+          hint="Names vets and farriers write for her that aren't her registered or barn name. One per line. The app reads these on bills too, so her paperwork stops going missing."
+          onSave={onSaveText}
+        />
+      </section>
+
       {h.docs.length > 0 && (
         <section className="sec">
           <h3>DOCUMENTS</h3>
@@ -963,23 +981,30 @@ export default function App({
 
   /* Notes and missing items — optimistic, reverted if SharePoint refuses */
   const saveText = useCallback(
-    async (horseId: string, field: "notes" | "missing", lines: string[]) => {
-      const before = horses.find((h) => h.id === horseId)?.[field] ?? [];
+    async (horseId: string, field: TextField, lines: string[]) => {
+      const key = field === "aka" ? "aka" : field;
+      const before = horses.find((h) => h.id === horseId)?.[key] ?? [];
       const clean = lines.map((l) => l.trim()).filter(Boolean);
       setHorses((hs) =>
-        hs.map((h) => (h.id === horseId ? { ...h, [field]: clean } : h))
+        hs.map((h) => (h.id === horseId ? { ...h, [key]: clean } : h))
       );
       try {
-        const res = await fetch("/api/notes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: horseId, field, lines: clean }),
-        });
+        const res = await fetch(
+          field === "aka" ? "/api/aliases" : "/api/notes",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body:
+              field === "aka"
+                ? JSON.stringify({ id: horseId, names: clean })
+                : JSON.stringify({ id: horseId, field, lines: clean }),
+          }
+        );
         if (!res.ok) throw new Error((await res.json()).error ?? "Failed");
         toast("Saved");
       } catch (e: any) {
         setHorses((hs) =>
-          hs.map((h) => (h.id === horseId ? { ...h, [field]: before } : h))
+          hs.map((h) => (h.id === horseId ? { ...h, [key]: before } : h))
         );
         toast(e?.message ?? "Didn't save");
       }

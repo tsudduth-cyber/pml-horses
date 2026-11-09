@@ -40,6 +40,44 @@ export async function readAliases(): Promise<Aliases> {
 }
 
 /**
+ * Replace the names `id` also answers to.
+ *
+ * This is the one the office drives, from the horse's own page. Vets and
+ * farriers write what they write — "Sorrel Recip", "recip mare 1", a barn
+ * name nobody told them was wrong — and every one of those is a bill the
+ * app cannot place. Typing the name here is the whole fix: the scanner
+ * reads these alongside her registered and barn names, in filenames and
+ * inside the documents, so the next scan places the bill. It beats
+ * waiting on a code change for what is really a spelling problem.
+ *
+ * Unlike rememberNames this can remove a name, because a wrong one typed
+ * in here would quietly credit another horse's paperwork to this one.
+ */
+export async function setNames(id: string, names: string[]) {
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const n = clean(raw);
+    if (!n || seen.has(n.toLowerCase())) continue;
+    seen.add(n.toLowerCase());
+    next.push(n);
+    if (next.length >= 20) break;
+  }
+
+  const all = await readAliases();
+  if (next.length) all[id] = next;
+  else delete all[id];
+
+  const p = encodeURIComponent(PATH()).replace(/%2F/g, "/");
+  await graph(`/drives/${DRIVE}/root:/${p}:/content`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(all, null, 1),
+  });
+  return next;
+}
+
+/**
  * Record names `id` used to go by. Returns quietly on failure: a lost
  * alias costs some history, a thrown error costs the save itself.
  */

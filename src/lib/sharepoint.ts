@@ -76,6 +76,17 @@ export const scanState = () => ({
 });
 
 /**
+ * Mark the saved reading wrong rather than merely old.
+ *
+ * Adding a name a horse answers to changes which horse the paperwork
+ * already on file belongs to, so the next open has to read it again
+ * instead of waiting out the clock.
+ */
+export function forgetScan() {
+  staleScan = true;
+}
+
+/**
  * Resolve the site and list by name so nobody has to go hunting for GUIDs.
  * Both are stable, so they're looked up once per server process.
  */

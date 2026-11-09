@@ -311,6 +311,7 @@ a.btn{text-decoration:none;text-align:center;display:block}
 .lhead h3{margin-bottom:0}
 .edit{font:inherit;font-size:12px;font-weight:600;color:var(--leather);background:none;border:0;padding:0;cursor:pointer}
 .addnote{font:inherit;font-size:13px;color:var(--mute);background:none;border:0;padding:0;cursor:pointer}
+.hint{font-size:12.5px;color:var(--mute);line-height:1.45;margin-bottom:9px}
 .addnote:hover{color:var(--leather)}
 .lines{width:100%;font:inherit;font-size:14px;font-family:var(--sans);line-height:1.55;padding:10px;
   border:1px solid var(--rule);background:var(--paper);color:var(--ink);border-radius:1px;resize:vertical}
